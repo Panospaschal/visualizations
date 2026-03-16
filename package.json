@@ -1,0 +1,14 @@
+{
+  "name": "looker-custom-visualizations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Custom Looker visualizations with build and deploy workflow",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && node scripts/build.mjs",
+    "build:watch": "node scripts/build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.1"
+  }
+}
