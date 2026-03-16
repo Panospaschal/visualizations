@@ -8,7 +8,7 @@ function ensureStylesheet() {
   link.id = CSS_ID
   link.rel = "stylesheet"
 
-  const script = document.currentScript
+  const script = document.currentScriptgdhkogjsdhijdfo;jhtsd;iugjf
   if (script?.src) {
     const baseUrl = script.src.replace(/acme_bar_plus\.js(?:\?.*)?$/, "")
     link.href = `${baseUrl}acme_bar_plus.css`

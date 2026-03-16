@@ -9,3 +9,9 @@ visualization: {
   label: "Acme Bar Plus"
   url: "@{ACME_VIZ_BASE_URL}/acme_bar_plus.js"
 }
+
+visualization: {
+  id: "acme_pie_custom"
+  label: "Acme Pie Custom"
+  url: "@{ACME_VIZ_BASE_URL}/acme_pie_custom.js"
+}

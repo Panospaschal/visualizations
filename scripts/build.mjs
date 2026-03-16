@@ -11,6 +11,10 @@ const buildTargets = [
     outfile: "dist/acme_bar_plus.js"
   },
   {
+    entryPoint: "src/acme_pie_custom.js",
+    outfile: "dist/acme_pie_custom.js"
+  },
+  {
     entryPoint: "src/report_table_panos.js",
     outfile: "dist/report_table.js"
   }

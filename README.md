@@ -5,6 +5,7 @@ Starter repository for hosting custom Looker visualizations from your own GitHub
 ## Included
 
 - `src/acme_bar_plus.js`: Custom Looker visualization plugin code.
+- `src/acme_pie_custom.js`: Custom Looker pie chart plugin with configurable palette.
 - `src/acme_bar_plus.css`: Stylesheet loaded by the plugin.
 - `looker/manifest.lkml`: Manifest snippet showing how to register the visualization URL.
 - `.github/workflows/deploy-pages.yml`: GitHub Actions workflow to build and publish `dist/` to GitHub Pages.
@@ -19,6 +20,7 @@ npm run build
 Build output:
 
 - `dist/acme_bar_plus.js`
+- `dist/acme_pie_custom.js`
 - `dist/acme_bar_plus.css`
 
 ## Publish with GitHub Pages
@@ -41,7 +43,13 @@ git push origin v1.0.0
 1. Update `looker/manifest.lkml` constant `ACME_VIZ_BASE_URL` with your GitHub Pages URL.
 2. Add the manifest visualization block to your Looker project manifest.
 3. Validate and deploy Looker project changes.
-4. In Explore, choose visualization type "Acme Bar Plus".
+4. In Explore, choose visualization type "Acme Bar Plus" or "Acme Pie Custom".
+
+## Pie palette configuration
+
+For `Acme Pie Custom`, use the visualization setting `Palette (comma separated colors)` and pass values like:
+
+`#0f766e, #0891b2, #2563eb, #ea580c`
 
 ## Versioning recommendation
 
