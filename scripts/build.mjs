@@ -21,6 +21,10 @@ const buildTargets = [
   {
     entryPoint: "src/acme_pivot_plus.js",
     outfile: "dist/acme_pivot_plus.js"
+  },
+  {
+    entryPoint: "src/acme_pivot_plus.js",
+    outfile: "dist/acme_pivot_plus_v2.js"
   }
 ]
 

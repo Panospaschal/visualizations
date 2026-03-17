@@ -17,7 +17,7 @@ visualization: {
 }
 
 visualization: {
-  id: "acme_pivot_plus"
-  label: "Acme Pivot Plus"
-  url: "@{ACME_VIZ_BASE_URL}/acme_pivot_plus.js"
+  id: "acme_pivot_plus_v2"
+  label: "Acme Pivot Plus v2"
+  url: "@{ACME_VIZ_BASE_URL}/acme_pivot_plus_v2.js"
 }

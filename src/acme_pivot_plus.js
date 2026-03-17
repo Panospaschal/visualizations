@@ -1,4 +1,4 @@
-const VIZ_ID = "acme_pivot_plus"
+const VIZ_ID = "acme_pivot_plus_v2"
 
 const NO_PIVOT_KEY = "__no_pivot__"
 
@@ -643,7 +643,7 @@ function renderNode({
 
 looker.plugins.visualizations.add({
   id: VIZ_ID,
-  label: "Acme Pivot Plus",
+  label: "Acme Pivot Plus v2",
   options: {
     preset_theme: {
       type: "string",
@@ -730,6 +730,7 @@ looker.plugins.visualizations.add({
   },
 
   updateAsync(data, element, config, queryResponse, details, done) {
+    try {
     const wrapper = element.querySelector(".acme-pivot-plus")
     if (!wrapper) {
       done()
@@ -815,5 +816,16 @@ looker.plugins.visualizations.add({
     }
 
     done()
+    } catch (error) {
+      this.addError({
+        title: "Pivot Plus v2 render error",
+        message: String(error && error.message ? error.message : error)
+      })
+      const wrapper = element.querySelector(".acme-pivot-plus")
+      if (wrapper) {
+        wrapper.innerHTML = ""
+      }
+      done()
+    }
   }
 })
