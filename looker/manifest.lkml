@@ -15,3 +15,9 @@ visualization: {
   label: "Acme Pie Custom"
   url: "@{ACME_VIZ_BASE_URL}/acme_pie_custom.js"
 }
+
+visualization: {
+  id: "acme_pivot_plus"
+  label: "Acme Pivot Plus"
+  url: "@{ACME_VIZ_BASE_URL}/acme_pivot_plus.js"
+}

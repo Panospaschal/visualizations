@@ -17,6 +17,10 @@ const buildTargets = [
   {
     entryPoint: "src/report_table_panos.js",
     outfile: "dist/report_table.js"
+  },
+  {
+    entryPoint: "src/acme_pivot_plus.js",
+    outfile: "dist/acme_pivot_plus.js"
   }
 ]
 
