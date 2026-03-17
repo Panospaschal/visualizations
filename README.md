@@ -64,6 +64,7 @@ For `Acme Pivot Plus v2` you can use:
 - `Style rules JSON`: rule-based styling by target/dimension/measure/pivot/subtotal level
 - `Threshold rules JSON`: conditional formatting by numeric value
 - Per-measure format controls are auto-generated in the panel for each measure (`looker`, `number`, `currency`, `percent`, `date`, `datetime`)
+- `Show measure format controls`: toggle dynamic measure-format fields on/off
 - `Measure formats JSON`: advanced per-measure overrides (`number`, `currency`, `percent`, `date`, `datetime`)
 
 Example `Subtotal dimensions` value:

@@ -296,63 +296,68 @@ function measureOptionKey(index, field) {
   return `measure_format_${index}_${field}`
 }
 
-function registerMeasureFormatOptions(vis, measures, defaultLocale) {
+function registerMeasureFormatOptions(vis, measures, defaultLocale, includeDynamic) {
   const signature = measures.map((measure) => measure.name).join("|")
-  if (vis._measureOptionSignature === signature) return
+  const mode = includeDynamic ? "dynamic" : "base"
+  const cacheKey = `${mode}|${signature}|${defaultLocale}`
+  if (vis._measureOptionSignature === cacheKey) return
 
-  const options = {}
-  measures.forEach((measure, index) => {
-    const label = measure.label_short ?? measure.label ?? measure.name
-    options[measureOptionKey(index, "type")] = {
-      type: "string",
-      display: "select",
-      label: `Format ${label}`,
-      default: "looker",
-      values: [
-        { looker: "looker" },
-        { number: "number" },
-        { currency: "currency" },
-        { percent: "percent" },
-        { date: "date" },
-        { datetime: "datetime" }
-      ]
-    }
-    options[measureOptionKey(index, "decimals")] = {
-      type: "number",
-      label: `Decimals ${label}`,
-      default: 2
-    }
-    options[measureOptionKey(index, "currency")] = {
-      type: "string",
-      label: `Currency ${label}`,
-      default: "EUR"
-    }
-    options[measureOptionKey(index, "percent_input")] = {
-      type: "string",
-      display: "select",
-      label: `Percent input ${label}`,
-      default: "ratio",
-      values: [{ ratio: "ratio" }, { whole: "whole" }]
-    }
-    options[measureOptionKey(index, "prefix")] = {
-      type: "string",
-      label: `Prefix ${label}`,
-      default: ""
-    }
-    options[measureOptionKey(index, "suffix")] = {
-      type: "string",
-      label: `Suffix ${label}`,
-      default: ""
-    }
-    options[measureOptionKey(index, "locale")] = {
-      type: "string",
-      label: `Locale ${label}`,
-      default: defaultLocale
-    }
-  })
+  const options = { ...BASE_OPTIONS }
+
+  if (includeDynamic) {
+    measures.forEach((measure, index) => {
+      const label = measure.label_short ?? measure.label ?? measure.name
+      options[measureOptionKey(index, "type")] = {
+        type: "string",
+        display: "select",
+        label: `Format ${label}`,
+        default: "looker",
+        values: [
+          { looker: "looker" },
+          { number: "number" },
+          { currency: "currency" },
+          { percent: "percent" },
+          { date: "date" },
+          { datetime: "datetime" }
+        ]
+      }
+      options[measureOptionKey(index, "decimals")] = {
+        type: "number",
+        label: `Decimals ${label}`,
+        default: 2
+      }
+      options[measureOptionKey(index, "currency")] = {
+        type: "string",
+        label: `Currency ${label}`,
+        default: "EUR"
+      }
+      options[measureOptionKey(index, "percent_input")] = {
+        type: "string",
+        display: "select",
+        label: `Percent input ${label}`,
+        default: "ratio",
+        values: [{ ratio: "ratio" }, { whole: "whole" }]
+      }
+      options[measureOptionKey(index, "prefix")] = {
+        type: "string",
+        label: `Prefix ${label}`,
+        default: ""
+      }
+      options[measureOptionKey(index, "suffix")] = {
+        type: "string",
+        label: `Suffix ${label}`,
+        default: ""
+      }
+      options[measureOptionKey(index, "locale")] = {
+        type: "string",
+        label: `Locale ${label}`,
+        default: defaultLocale
+      }
+    })
+  }
 
   vis.trigger("registerOptions", options)
-  vis._measureOptionSignature = signature
+  vis._measureOptionSignature = cacheKey
 }
 
 function buildMeasureFormatsFromOptions(measures, config, defaultLocale) {
@@ -894,141 +899,148 @@ function renderNode({
   })
 }
 
+const BASE_OPTIONS = {
+  preset_theme: {
+    type: "string",
+    display: "select",
+    label: "Visual preset",
+    default: "custom",
+    values: [{ custom: "custom" }, { finance: "finance" }, { retail: "retail" }]
+  },
+  header_bg_color: {
+    type: "string",
+    display: "color",
+    label: "Header background",
+    default: "#f3f4f6"
+  },
+  header_font_color: {
+    type: "string",
+    display: "color",
+    label: "Header font color",
+    default: "#111827"
+  },
+  header_align: {
+    type: "string",
+    display: "select",
+    label: "Header alignment",
+    default: "left",
+    values: [{ left: "left" }, { center: "center" }, { right: "right" }]
+  },
+  header_bold: { type: "boolean", label: "Header bold", default: true },
+
+  value_bg_color: {
+    type: "string",
+    display: "color",
+    label: "Values background",
+    default: "#ffffff"
+  },
+  value_font_color: {
+    type: "string",
+    display: "color",
+    label: "Values font color",
+    default: "#111827"
+  },
+  value_align: {
+    type: "string",
+    display: "select",
+    label: "Value alignment",
+    default: "right",
+    values: [{ left: "left" }, { center: "center" }, { right: "right" }]
+  },
+  value_bold: { type: "boolean", label: "Values bold", default: false },
+
+  enable_subtotals: { type: "boolean", label: "Enable subtotals", default: true },
+  subtotal_levels: {
+    type: "string",
+    label: "Subtotal levels (comma separated)",
+    default: "1,2,3"
+  },
+  subtotal_dimensions: {
+    type: "string",
+    label: "Subtotal dimensions (comma separated names)",
+    default: ""
+  },
+  subtotal_bg_color: {
+    type: "string",
+    display: "color",
+    label: "Subtotal background",
+    default: "#e5e7eb"
+  },
+  subtotal_font_color: {
+    type: "string",
+    display: "color",
+    label: "Subtotal font color",
+    default: "#111827"
+  },
+  subtotal_bold: { type: "boolean", label: "Subtotal bold", default: true },
+  subtotal_level_styles_json: {
+    type: "string",
+    label: "Subtotal level styles JSON",
+    default: "{}"
+  },
+
+  show_detail_rows: { type: "boolean", label: "Show detail rows", default: true },
+
+  table_border_color: {
+    type: "string",
+    display: "color",
+    label: "Table border color",
+    default: "#9ca3af"
+  },
+  table_border_width: { type: "number", label: "Table border width", default: 1 },
+  table_border_style: {
+    type: "string",
+    display: "select",
+    label: "Table border style",
+    default: "solid",
+    values: [{ solid: "solid" }, { dashed: "dashed" }, { dotted: "dotted" }]
+  },
+  cell_border_color: {
+    type: "string",
+    display: "color",
+    label: "Cell border color",
+    default: "#d1d5db"
+  },
+  cell_border_width: { type: "number", label: "Cell border width", default: 1 },
+  cell_border_style: {
+    type: "string",
+    display: "select",
+    label: "Cell border style",
+    default: "solid",
+    values: [{ solid: "solid" }, { dashed: "dashed" }, { dotted: "dotted" }]
+  },
+
+  style_rules_json: {
+    type: "string",
+    label: "Style rules JSON",
+    default: "[]"
+  },
+  threshold_rules_json: {
+    type: "string",
+    label: "Threshold rules JSON",
+    default: "[]"
+  },
+  default_locale: {
+    type: "string",
+    label: "Default locale",
+    default: "el-GR"
+  },
+  enable_measure_format_controls: {
+    type: "boolean",
+    label: "Show measure format controls",
+    default: true
+  },
+  measure_formats_json: {
+    type: "string",
+    label: "Measure formats JSON",
+    default: "{}"
+  }
+}
+
 looker.plugins.visualizations.add({
   id: VIZ_ID,
   label: "Acme Pivot Plus v2",
-  options: {
-    preset_theme: {
-      type: "string",
-      display: "select",
-      label: "Visual preset",
-      default: "custom",
-      values: [{ custom: "custom" }, { finance: "finance" }, { retail: "retail" }]
-    },
-    header_bg_color: {
-      type: "string",
-      display: "color",
-      label: "Header background",
-      default: "#f3f4f6"
-    },
-    header_font_color: {
-      type: "string",
-      display: "color",
-      label: "Header font color",
-      default: "#111827"
-    },
-    header_align: {
-      type: "string",
-      display: "select",
-      label: "Header alignment",
-      default: "left",
-      values: [{ left: "left" }, { center: "center" }, { right: "right" }]
-    },
-    header_bold: { type: "boolean", label: "Header bold", default: true },
-
-    value_bg_color: {
-      type: "string",
-      display: "color",
-      label: "Values background",
-      default: "#ffffff"
-    },
-    value_font_color: {
-      type: "string",
-      display: "color",
-      label: "Values font color",
-      default: "#111827"
-    },
-    value_align: {
-      type: "string",
-      display: "select",
-      label: "Value alignment",
-      default: "right",
-      values: [{ left: "left" }, { center: "center" }, { right: "right" }]
-    },
-    value_bold: { type: "boolean", label: "Values bold", default: false },
-
-    enable_subtotals: { type: "boolean", label: "Enable subtotals", default: true },
-    subtotal_levels: {
-      type: "string",
-      label: "Subtotal levels (comma separated)",
-      default: "1,2,3"
-    },
-    subtotal_dimensions: {
-      type: "string",
-      label: "Subtotal dimensions (comma separated names)",
-      default: ""
-    },
-    subtotal_bg_color: {
-      type: "string",
-      display: "color",
-      label: "Subtotal background",
-      default: "#e5e7eb"
-    },
-    subtotal_font_color: {
-      type: "string",
-      display: "color",
-      label: "Subtotal font color",
-      default: "#111827"
-    },
-    subtotal_bold: { type: "boolean", label: "Subtotal bold", default: true },
-    subtotal_level_styles_json: {
-      type: "string",
-      label: "Subtotal level styles JSON",
-      default: "{}"
-    },
-
-    show_detail_rows: { type: "boolean", label: "Show detail rows", default: true },
-
-    table_border_color: {
-      type: "string",
-      display: "color",
-      label: "Table border color",
-      default: "#9ca3af"
-    },
-    table_border_width: { type: "number", label: "Table border width", default: 1 },
-    table_border_style: {
-      type: "string",
-      display: "select",
-      label: "Table border style",
-      default: "solid",
-      values: [{ solid: "solid" }, { dashed: "dashed" }, { dotted: "dotted" }]
-    },
-    cell_border_color: {
-      type: "string",
-      display: "color",
-      label: "Cell border color",
-      default: "#d1d5db"
-    },
-    cell_border_width: { type: "number", label: "Cell border width", default: 1 },
-    cell_border_style: {
-      type: "string",
-      display: "select",
-      label: "Cell border style",
-      default: "solid",
-      values: [{ solid: "solid" }, { dashed: "dashed" }, { dotted: "dotted" }]
-    },
-
-    style_rules_json: {
-      type: "string",
-      label: "Style rules JSON",
-      default: "[]"
-    },
-    threshold_rules_json: {
-      type: "string",
-      label: "Threshold rules JSON",
-      default: "[]"
-    },
-    default_locale: {
-      type: "string",
-      label: "Default locale",
-      default: "el-GR"
-    },
-    measure_formats_json: {
-      type: "string",
-      label: "Measure formats JSON",
-      default: "{}"
-    }
-  },
+  options: BASE_OPTIONS,
 
   create(element) {
     element.innerHTML = ""
@@ -1063,12 +1075,15 @@ looker.plugins.visualizations.add({
     const defaultLocale = typeof config.default_locale === "string" && config.default_locale.trim()
       ? config.default_locale
       : "el-GR"
+    const includeMeasureControls = config.enable_measure_format_controls !== false
 
-    registerMeasureFormatOptions(this, measures, defaultLocale)
+    registerMeasureFormatOptions(this, measures, defaultLocale, includeMeasureControls)
 
     const rules = parseJsonArray(config.style_rules_json, [])
     const thresholdRules = parseJsonArray(config.threshold_rules_json, [])
-    const optionMeasureFormats = buildMeasureFormatsFromOptions(measures, config, defaultLocale)
+    const optionMeasureFormats = includeMeasureControls
+      ? buildMeasureFormatsFromOptions(measures, config, defaultLocale)
+      : {}
     const jsonMeasureFormats = parseJsonObject(config.measure_formats_json, {})
     const measureFormats = {
       ...optionMeasureFormats,
