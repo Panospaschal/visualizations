@@ -56,11 +56,43 @@ For `Acme Pie Custom`, use the visualization setting `Palette (comma separated c
 
 ## Pivot presets and threshold formatting
 
-For `Acme Pivot Plus` you can use:
+For `Acme Pivot Plus v2` you can use:
 
 - `Visual preset`: `custom`, `finance`, `retail`
+- Color options use native Looker color picker controls
 - `Style rules JSON`: rule-based styling by target/dimension/measure/pivot/subtotal level
 - `Threshold rules JSON`: conditional formatting by numeric value
+- `Measure formats JSON`: per-measure format overrides (`number`, `currency`, `percent`, `date`, `datetime`)
+
+Example `Measure formats JSON`:
+
+```json
+{
+  "orders.total_sales": {
+    "type": "currency",
+    "currency": "EUR",
+    "decimals": 2,
+    "locale": "el-GR"
+  },
+  "orders.margin_pct": {
+    "type": "percent",
+    "decimals": 1,
+    "percent_input": "whole",
+    "locale": "el-GR"
+  },
+  "orders.quantity": {
+    "type": "number",
+    "decimals": 0,
+    "suffix": " pcs",
+    "locale": "el-GR"
+  },
+  "orders.invoice_date": {
+    "type": "date",
+    "locale": "el-GR",
+    "dateOptions": { "year": "numeric", "month": "2-digit", "day": "2-digit" }
+  }
+}
+```
 
 Example `Threshold rules JSON`:
 

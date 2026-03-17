@@ -9,12 +9,114 @@ function asNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function formatValue(field, value) {
+function asDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  if (typeof value === "string" && value.trim()) {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return null
+}
+
+function toNonNegativeInteger(value) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) return null
+  return parsed
+}
+
+function formatWithIntlNumber(value, locale, options) {
+  try {
+    return new Intl.NumberFormat(locale, options).format(value)
+  } catch (_error) {
+    return value.toLocaleString()
+  }
+}
+
+function formatWithIntlDate(value, locale, options) {
+  try {
+    return new Intl.DateTimeFormat(locale, options).format(value)
+  } catch (_error) {
+    return value.toLocaleString()
+  }
+}
+
+function formatByMeasureConfig(value, config, fallbackLocale) {
+  if (!config || typeof config !== "object") return null
+
+  const type = String(config.type || "").toLowerCase()
+  const locale = typeof config.locale === "string" && config.locale.trim()
+    ? config.locale
+    : fallbackLocale
+  const prefix = typeof config.prefix === "string" ? config.prefix : ""
+  const suffix = typeof config.suffix === "string" ? config.suffix : ""
+
+  if (type === "number" || type === "currency" || type === "percent") {
+    const numeric = asNumber(value)
+    if (numeric == null) return "-"
+
+    const decimals = toNonNegativeInteger(config.decimals)
+    const options = {}
+    if (decimals != null) {
+      options.minimumFractionDigits = decimals
+      options.maximumFractionDigits = decimals
+    }
+
+    if (type === "currency") {
+      options.style = "currency"
+      options.currency = typeof config.currency === "string" && config.currency ? config.currency : "EUR"
+    } else if (type === "percent") {
+      options.style = "percent"
+      const percentInput = config.percent_input === "whole" ? "whole" : "ratio"
+      const percentValue = percentInput === "whole" ? numeric / 100 : numeric
+      return `${prefix}${formatWithIntlNumber(percentValue, locale, options)}${suffix}`
+    }
+
+    return `${prefix}${formatWithIntlNumber(numeric, locale, options)}${suffix}`
+  }
+
+  if (type === "date" || type === "datetime") {
+    const date = asDate(value)
+    if (!date) return "-"
+
+    const defaultDateOptions = type === "date"
+      ? { year: "numeric", month: "2-digit", day: "2-digit" }
+      : {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit"
+        }
+
+    const dateOptions = config.dateOptions && typeof config.dateOptions === "object"
+      ? config.dateOptions
+      : defaultDateOptions
+
+    return `${prefix}${formatWithIntlDate(date, locale, dateOptions)}${suffix}`
+  }
+
+  return null
+}
+
+function formatValue(field, value, measureConfig, fallbackLocale) {
   if (value == null) return "-"
+
+  const customFormatted = formatByMeasureConfig(value, measureConfig, fallbackLocale)
+  if (customFormatted != null) return customFormatted
+
   if (field?.value_format && typeof LookerCharts !== "undefined") {
     return LookerCharts.Utils.textForCell({ value, value_format: field.value_format })
   }
-  return value.toLocaleString()
+
+  if (typeof value === "number") {
+    return formatWithIntlNumber(value, fallbackLocale, {})
+  }
+
+  return String(value)
 }
 
 function parseJsonObject(raw, fallback = {}) {
@@ -431,6 +533,8 @@ function addSubtotalRow({
   dimensions,
   valueColumns,
   measuresMap,
+  measureFormats,
+  defaultLocale,
   config,
   rules,
   thresholdRules,
@@ -486,7 +590,8 @@ function addSubtotalRow({
     const value = node.totals[column.measureName][column.pivotKey]
     if (showSubtotal) {
       const measure = measuresMap.get(column.measureName)
-      td.textContent = formatValue(measure, value)
+      const measureConfig = measureFormats[column.measureName]
+      td.textContent = formatValue(measure, value, measureConfig, defaultLocale)
     }
 
     const context = {
@@ -521,6 +626,8 @@ function addDetailRow({
   dimensions,
   valueColumns,
   measuresMap,
+  measureFormats,
+  defaultLocale,
   config,
   rules,
   thresholdRules
@@ -554,8 +661,9 @@ function addDetailRow({
   valueColumns.forEach((column) => {
     const td = document.createElement("td")
     const measure = measuresMap.get(column.measureName)
+    const measureConfig = measureFormats[column.measureName]
     const value = detailRow.values[column.measureName][column.pivotKey]
-    td.textContent = formatValue(measure, value)
+    td.textContent = formatValue(measure, value, measureConfig, defaultLocale)
 
     const context = {
       target: "value",
@@ -585,6 +693,8 @@ function renderNode({
   dimensions,
   valueColumns,
   measuresMap,
+  measureFormats,
+  defaultLocale,
   config,
   rules,
   thresholdRules,
@@ -598,6 +708,8 @@ function renderNode({
     dimensions,
     valueColumns,
     measuresMap,
+    measureFormats,
+    defaultLocale,
     config,
     rules,
     thresholdRules,
@@ -615,6 +727,8 @@ function renderNode({
         dimensions,
         valueColumns,
         measuresMap,
+        measureFormats,
+        defaultLocale,
         config,
         rules,
         thresholdRules,
@@ -634,6 +748,8 @@ function renderNode({
       dimensions,
       valueColumns,
       measuresMap,
+      measureFormats,
+      defaultLocale,
       config,
       rules,
       thresholdRules
@@ -652,8 +768,18 @@ looker.plugins.visualizations.add({
       default: "custom",
       values: [{ custom: "custom" }, { finance: "finance" }, { retail: "retail" }]
     },
-    header_bg_color: { type: "string", label: "Header background", default: "#f3f4f6" },
-    header_font_color: { type: "string", label: "Header font color", default: "#111827" },
+    header_bg_color: {
+      type: "string",
+      display: "color",
+      label: "Header background",
+      default: "#f3f4f6"
+    },
+    header_font_color: {
+      type: "string",
+      display: "color",
+      label: "Header font color",
+      default: "#111827"
+    },
     header_align: {
       type: "string",
       display: "select",
@@ -663,8 +789,18 @@ looker.plugins.visualizations.add({
     },
     header_bold: { type: "boolean", label: "Header bold", default: true },
 
-    value_bg_color: { type: "string", label: "Values background", default: "#ffffff" },
-    value_font_color: { type: "string", label: "Values font color", default: "#111827" },
+    value_bg_color: {
+      type: "string",
+      display: "color",
+      label: "Values background",
+      default: "#ffffff"
+    },
+    value_font_color: {
+      type: "string",
+      display: "color",
+      label: "Values font color",
+      default: "#111827"
+    },
     value_align: {
       type: "string",
       display: "select",
@@ -680,8 +816,18 @@ looker.plugins.visualizations.add({
       label: "Subtotal levels (comma separated)",
       default: "1,2,3"
     },
-    subtotal_bg_color: { type: "string", label: "Subtotal background", default: "#e5e7eb" },
-    subtotal_font_color: { type: "string", label: "Subtotal font color", default: "#111827" },
+    subtotal_bg_color: {
+      type: "string",
+      display: "color",
+      label: "Subtotal background",
+      default: "#e5e7eb"
+    },
+    subtotal_font_color: {
+      type: "string",
+      display: "color",
+      label: "Subtotal font color",
+      default: "#111827"
+    },
     subtotal_bold: { type: "boolean", label: "Subtotal bold", default: true },
     subtotal_level_styles_json: {
       type: "string",
@@ -691,7 +837,12 @@ looker.plugins.visualizations.add({
 
     show_detail_rows: { type: "boolean", label: "Show detail rows", default: true },
 
-    table_border_color: { type: "string", label: "Table border color", default: "#9ca3af" },
+    table_border_color: {
+      type: "string",
+      display: "color",
+      label: "Table border color",
+      default: "#9ca3af"
+    },
     table_border_width: { type: "number", label: "Table border width", default: 1 },
     table_border_style: {
       type: "string",
@@ -700,7 +851,12 @@ looker.plugins.visualizations.add({
       default: "solid",
       values: [{ solid: "solid" }, { dashed: "dashed" }, { dotted: "dotted" }]
     },
-    cell_border_color: { type: "string", label: "Cell border color", default: "#d1d5db" },
+    cell_border_color: {
+      type: "string",
+      display: "color",
+      label: "Cell border color",
+      default: "#d1d5db"
+    },
     cell_border_width: { type: "number", label: "Cell border width", default: 1 },
     cell_border_style: {
       type: "string",
@@ -719,6 +875,16 @@ looker.plugins.visualizations.add({
       type: "string",
       label: "Threshold rules JSON",
       default: "[]"
+    },
+    default_locale: {
+      type: "string",
+      label: "Default locale",
+      default: "el-GR"
+    },
+    measure_formats_json: {
+      type: "string",
+      label: "Measure formats JSON",
+      default: "{}"
     }
   },
 
@@ -754,6 +920,7 @@ looker.plugins.visualizations.add({
 
     const rules = parseJsonArray(config.style_rules_json, [])
     const thresholdRules = parseJsonArray(config.threshold_rules_json, [])
+    const measureFormats = parseJsonObject(config.measure_formats_json, {})
     const subtotalLevelStyles = parseJsonObject(config.subtotal_level_styles_json, {})
     const parsedConfig = {
       ...config,
@@ -762,6 +929,9 @@ looker.plugins.visualizations.add({
       subtotalLevelStyles
     }
     const finalConfig = applyPresetConfig(parsedConfig)
+    const defaultLocale = typeof config.default_locale === "string" && config.default_locale.trim()
+      ? config.default_locale
+      : "el-GR"
 
     const pivots = getPivotEntries(queryResponse)
     const valueColumns = buildValueColumns(measures, pivots)
@@ -785,6 +955,8 @@ looker.plugins.visualizations.add({
           dimensions,
           valueColumns,
           measuresMap,
+          measureFormats,
+          defaultLocale,
           config: finalConfig,
           rules,
           thresholdRules,
