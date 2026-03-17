@@ -275,6 +275,118 @@ function parseSubtotalLevels(rawLevels, maxLevel) {
   return set
 }
 
+function parseSubtotalDimensions(rawDimensions, dimensions) {
+  if (!rawDimensions || typeof rawDimensions !== "string") return new Set()
+
+  const allowed = new Set(dimensions.map((dimension) => dimension.name))
+  const selected = new Set()
+
+  rawDimensions
+    .split(",")
+    .map((part) => part.trim())
+    .filter((name) => name.length > 0)
+    .forEach((name) => {
+      if (allowed.has(name)) selected.add(name)
+    })
+
+  return selected
+}
+
+function measureOptionKey(index, field) {
+  return `measure_format_${index}_${field}`
+}
+
+function registerMeasureFormatOptions(vis, measures, defaultLocale) {
+  const signature = measures.map((measure) => measure.name).join("|")
+  if (vis._measureOptionSignature === signature) return
+
+  const options = {}
+  measures.forEach((measure, index) => {
+    const label = measure.label_short ?? measure.label ?? measure.name
+    options[measureOptionKey(index, "type")] = {
+      type: "string",
+      display: "select",
+      label: `Format ${label}`,
+      default: "looker",
+      values: [
+        { looker: "looker" },
+        { number: "number" },
+        { currency: "currency" },
+        { percent: "percent" },
+        { date: "date" },
+        { datetime: "datetime" }
+      ]
+    }
+    options[measureOptionKey(index, "decimals")] = {
+      type: "number",
+      label: `Decimals ${label}`,
+      default: 2
+    }
+    options[measureOptionKey(index, "currency")] = {
+      type: "string",
+      label: `Currency ${label}`,
+      default: "EUR"
+    }
+    options[measureOptionKey(index, "percent_input")] = {
+      type: "string",
+      display: "select",
+      label: `Percent input ${label}`,
+      default: "ratio",
+      values: [{ ratio: "ratio" }, { whole: "whole" }]
+    }
+    options[measureOptionKey(index, "prefix")] = {
+      type: "string",
+      label: `Prefix ${label}`,
+      default: ""
+    }
+    options[measureOptionKey(index, "suffix")] = {
+      type: "string",
+      label: `Suffix ${label}`,
+      default: ""
+    }
+    options[measureOptionKey(index, "locale")] = {
+      type: "string",
+      label: `Locale ${label}`,
+      default: defaultLocale
+    }
+  })
+
+  vis.trigger("registerOptions", options)
+  vis._measureOptionSignature = signature
+}
+
+function buildMeasureFormatsFromOptions(measures, config, defaultLocale) {
+  const formats = {}
+
+  measures.forEach((measure, index) => {
+    const type = String(config[measureOptionKey(index, "type")] || "looker").toLowerCase()
+    if (type === "looker") return
+
+    const format = { type }
+    const decimals = toNonNegativeInteger(config[measureOptionKey(index, "decimals")])
+    const currency = config[measureOptionKey(index, "currency")]
+    const percentInput = config[measureOptionKey(index, "percent_input")]
+    const prefix = config[measureOptionKey(index, "prefix")]
+    const suffix = config[measureOptionKey(index, "suffix")]
+    const locale = config[measureOptionKey(index, "locale")]
+
+    if (decimals != null) format.decimals = decimals
+    if (typeof currency === "string" && currency.trim()) format.currency = currency.trim().toUpperCase()
+    if (percentInput === "whole" || percentInput === "ratio") format.percent_input = percentInput
+    if (typeof prefix === "string" && prefix) format.prefix = prefix
+    if (typeof suffix === "string" && suffix) format.suffix = suffix
+    if (typeof locale === "string" && locale.trim()) {
+      format.locale = locale.trim()
+    } else {
+      format.locale = defaultLocale
+    }
+
+    formats[measure.name] = format
+  })
+
+  return formats
+}
+
 function getPivotEntries(queryResponse) {
   const pivots = Array.isArray(queryResponse.pivots) ? queryResponse.pivots : []
   if (!pivots.length) return [{ key: NO_PIVOT_KEY, label: "Value" }]
@@ -699,9 +811,33 @@ function renderNode({
   rules,
   thresholdRules,
   subtotalLevels,
+  subtotalDimensions,
   expandedNodes
 }) {
-  const showSubtotal = config.enable_subtotals !== false && subtotalLevels.has(node.level)
+  const showSubtotal =
+    config.enable_subtotals !== false &&
+    subtotalLevels.has(node.level) &&
+    subtotalDimensions.has(node.dimension)
+
+  if (!showSubtotal && !node.children.size) {
+    if (config.show_detail_rows === false) return
+    node.rows.forEach((detailRow) => {
+      addDetailRow({
+        tbody,
+        detailRow,
+        dimensions,
+        valueColumns,
+        measuresMap,
+        measureFormats,
+        defaultLocale,
+        config,
+        rules,
+        thresholdRules
+      })
+    })
+    return
+  }
+
   const expanded = addSubtotalRow({
     tbody,
     node,
@@ -733,6 +869,7 @@ function renderNode({
         rules,
         thresholdRules,
         subtotalLevels,
+        subtotalDimensions,
         expandedNodes
       })
     })
@@ -815,6 +952,11 @@ looker.plugins.visualizations.add({
       type: "string",
       label: "Subtotal levels (comma separated)",
       default: "1,2,3"
+    },
+    subtotal_dimensions: {
+      type: "string",
+      label: "Subtotal dimensions (comma separated names)",
+      default: ""
     },
     subtotal_bg_color: {
       type: "string",
@@ -918,9 +1060,20 @@ looker.plugins.visualizations.add({
 
     this.clearErrors()
 
+    const defaultLocale = typeof config.default_locale === "string" && config.default_locale.trim()
+      ? config.default_locale
+      : "el-GR"
+
+    registerMeasureFormatOptions(this, measures, defaultLocale)
+
     const rules = parseJsonArray(config.style_rules_json, [])
     const thresholdRules = parseJsonArray(config.threshold_rules_json, [])
-    const measureFormats = parseJsonObject(config.measure_formats_json, {})
+    const optionMeasureFormats = buildMeasureFormatsFromOptions(measures, config, defaultLocale)
+    const jsonMeasureFormats = parseJsonObject(config.measure_formats_json, {})
+    const measureFormats = {
+      ...optionMeasureFormats,
+      ...jsonMeasureFormats
+    }
     const subtotalLevelStyles = parseJsonObject(config.subtotal_level_styles_json, {})
     const parsedConfig = {
       ...config,
@@ -929,14 +1082,12 @@ looker.plugins.visualizations.add({
       subtotalLevelStyles
     }
     const finalConfig = applyPresetConfig(parsedConfig)
-    const defaultLocale = typeof config.default_locale === "string" && config.default_locale.trim()
-      ? config.default_locale
-      : "el-GR"
 
     const pivots = getPivotEntries(queryResponse)
     const valueColumns = buildValueColumns(measures, pivots)
     const tree = buildTree(data, dimensions, measures, pivots)
     const subtotalLevels = parseSubtotalLevels(config.subtotal_levels, dimensions.length)
+    const subtotalDimensions = parseSubtotalDimensions(config.subtotal_dimensions, dimensions)
     const measuresMap = new Map(measures.map((measure) => [measure.name, measure]))
     const expandedNodes = ensureExpandedSet(this)
 
@@ -961,6 +1112,7 @@ looker.plugins.visualizations.add({
           rules,
           thresholdRules,
           subtotalLevels,
+          subtotalDimensions,
           expandedNodes
         })
       })

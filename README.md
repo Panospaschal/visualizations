@@ -60,9 +60,15 @@ For `Acme Pivot Plus v2` you can use:
 
 - `Visual preset`: `custom`, `finance`, `retail`
 - Color options use native Looker color picker controls
+- `Subtotal dimensions (comma separated names)`: show subtotals only for specific dimensions
 - `Style rules JSON`: rule-based styling by target/dimension/measure/pivot/subtotal level
 - `Threshold rules JSON`: conditional formatting by numeric value
-- `Measure formats JSON`: per-measure format overrides (`number`, `currency`, `percent`, `date`, `datetime`)
+- Per-measure format controls are auto-generated in the panel for each measure (`looker`, `number`, `currency`, `percent`, `date`, `datetime`)
+- `Measure formats JSON`: advanced per-measure overrides (`number`, `currency`, `percent`, `date`, `datetime`)
+
+Example `Subtotal dimensions` value:
+
+`invoices.hypercategory, invoices.department`
 
 Example `Measure formats JSON`:
 
