@@ -66,6 +66,11 @@ For `Acme Pivot Plus v2` you can use:
 - Per-measure format controls are auto-generated in the panel for each measure (`looker`, `number`, `currency`, `percent`, `date`, `datetime`)
 - `Show measure format controls`: toggle dynamic measure-format fields on/off
 - `Measure formats JSON`: advanced per-measure overrides (`number`, `currency`, `percent`, `date`, `datetime`)
+- `Show row totals` / `Show column totals`: toggle totals per measure and bottom totals row
+- `Split pivot headers`: renders pivot labels on top row and measures on second row
+- `Repeat dimension values`: repeat or suppress repeated dimension text in expanded rows
+- Font controls: `Font family`, `Font size`, `Header font size`, `Value font size`
+- Per-field alignment controls are auto-generated for each dimension and measure
 
 Example `Subtotal dimensions` value:
 

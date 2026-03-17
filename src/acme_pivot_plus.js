@@ -1,6 +1,7 @@
 const VIZ_ID = "acme_pivot_plus_v2"
 
 const NO_PIVOT_KEY = "__no_pivot__"
+const ROW_TOTAL_KEY = "__row_total__"
 
 function asNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null
@@ -276,33 +277,76 @@ function parseSubtotalLevels(rawLevels, maxLevel) {
 }
 
 function parseSubtotalDimensions(rawDimensions, dimensions) {
-  if (!rawDimensions || typeof rawDimensions !== "string") return new Set()
+  const normalize = (value) => String(value || "").trim().toLowerCase()
+  const nameByToken = new Map()
+  dimensions.forEach((dimension) => {
+    const name = dimension.name
+    nameByToken.set(normalize(name), name)
+    nameByToken.set(normalize(dimension.label), name)
+    nameByToken.set(normalize(dimension.label_short), name)
+  })
 
-  const allowed = new Set(dimensions.map((dimension) => dimension.name))
+  if (!rawDimensions || typeof rawDimensions !== "string" || !rawDimensions.trim()) {
+    return new Set(dimensions.map((dimension) => dimension.name))
+  }
+
   const selected = new Set()
 
   rawDimensions
     .split(",")
-    .map((part) => part.trim())
+    .map((part) => normalize(part))
     .filter((name) => name.length > 0)
-    .forEach((name) => {
-      if (allowed.has(name)) selected.add(name)
+    .forEach((token) => {
+      const resolvedName = nameByToken.get(token)
+      if (resolvedName) selected.add(resolvedName)
     })
 
-  return selected
+  return selected.size ? selected : new Set(dimensions.map((dimension) => dimension.name))
 }
 
 function measureOptionKey(index, field) {
   return `measure_format_${index}_${field}`
 }
 
-function registerMeasureFormatOptions(vis, measures, defaultLocale, includeDynamic) {
-  const signature = measures.map((measure) => measure.name).join("|")
+function dimensionOptionKey(index) {
+  return `dimension_align_${index}`
+}
+
+function measureAlignOptionKey(index) {
+  return `measure_align_${index}`
+}
+
+function registerMeasureFormatOptions(vis, dimensions, measures, defaultLocale, includeDynamic) {
+  const signature = `${dimensions.map((dimension) => dimension.name).join("|")}::${measures
+    .map((measure) => measure.name)
+    .join("|")}`
   const mode = includeDynamic ? "dynamic" : "base"
   const cacheKey = `${mode}|${signature}|${defaultLocale}`
   if (vis._measureOptionSignature === cacheKey) return
 
   const options = { ...BASE_OPTIONS }
+
+  dimensions.forEach((dimension, index) => {
+    const label = dimension.label_short ?? dimension.label ?? dimension.name
+    options[dimensionOptionKey(index)] = {
+      type: "string",
+      display: "select",
+      label: `Align ${label}`,
+      default: "left",
+      values: [{ left: "left" }, { center: "center" }, { right: "right" }]
+    }
+  })
+
+  measures.forEach((measure, index) => {
+    const label = measure.label_short ?? measure.label ?? measure.name
+    options[measureAlignOptionKey(index)] = {
+      type: "string",
+      display: "select",
+      label: `Align ${label}`,
+      default: "right",
+      values: [{ left: "left" }, { center: "center" }, { right: "right" }]
+    }
+  })
 
   if (includeDynamic) {
     measures.forEach((measure, index) => {
@@ -390,6 +434,25 @@ function buildMeasureFormatsFromOptions(measures, config, defaultLocale) {
   })
 
   return formats
+}
+
+function getDimensionAlignment(config, dimensionIndex) {
+  return normalizeAlign(config[dimensionOptionKey(dimensionIndex)], config.value_align)
+}
+
+function getMeasureAlignment(config, measureIndex) {
+  return normalizeAlign(config[measureAlignOptionKey(measureIndex)], config.value_align)
+}
+
+function shouldDisplayDimensionValue(previousDimensions, currentDimensions, index, repeatValues) {
+  if (repeatValues !== false) return true
+  if (!previousDimensions) return true
+  for (let i = 0; i <= index; i += 1) {
+    if (previousDimensions[i] !== currentDimensions[i]) {
+      return true
+    }
+  }
+  return false
 }
 
 function getPivotEntries(queryResponse) {
@@ -503,22 +566,51 @@ function buildTree(data, dimensions, measures, pivots) {
   return root
 }
 
-function buildValueColumns(measures, pivots) {
+function buildValueColumns(measures, pivots, showRowTotals) {
   const columns = []
+  const hasRealPivots = pivots.some((pivot) => pivot.key !== NO_PIVOT_KEY)
+
   measures.forEach((measure) => {
     pivots.forEach((pivot) => {
       const pivotLabel = pivot.key === NO_PIVOT_KEY ? "" : pivot.label
       columns.push({
         id: `${measure.name}::${pivot.key}`,
         measureName: measure.name,
+        measureIndex: measures.findIndex((entry) => entry.name === measure.name),
         measureLabel: measure.label_short ?? measure.label,
         pivotKey: pivot.key,
         pivotLabel,
+        isRowTotal: false,
         label: pivotLabel ? `${pivotLabel} - ${measure.label_short ?? measure.label}` : (measure.label_short ?? measure.label)
       })
     })
+
+    if (showRowTotals && hasRealPivots) {
+      columns.push({
+        id: `${measure.name}::${ROW_TOTAL_KEY}`,
+        measureName: measure.name,
+        measureIndex: measures.findIndex((entry) => entry.name === measure.name),
+        measureLabel: measure.label_short ?? measure.label,
+        pivotKey: ROW_TOTAL_KEY,
+        pivotLabel: "Total",
+        isRowTotal: true,
+        label: `Total - ${measure.label_short ?? measure.label}`
+      })
+    }
   })
+
   return columns
+}
+
+function getColumnNumericValue(valuesByMeasure, column, pivots) {
+  if (!column.isRowTotal) {
+    return valuesByMeasure[column.measureName][column.pivotKey]
+  }
+
+  return pivots.reduce((sum, pivot) => {
+    if (pivot.key === NO_PIVOT_KEY) return sum
+    return sum + (valuesByMeasure[column.measureName][pivot.key] || 0)
+  }, 0)
 }
 
 function addStyles(element, config) {
@@ -527,6 +619,16 @@ function addStyles(element, config) {
 
   const safeTableBorderWidth = Number.isFinite(tableBorderWidth) && tableBorderWidth >= 0 ? tableBorderWidth : 1
   const safeCellBorderWidth = Number.isFinite(cellBorderWidth) && cellBorderWidth >= 0 ? cellBorderWidth : 1
+  const baseFontSize = Number(config.font_size_px)
+  const headerFontSize = Number(config.header_font_size_px)
+  const valueFontSize = Number(config.value_font_size_px)
+  const safeBaseFontSize = Number.isFinite(baseFontSize) && baseFontSize > 0 ? baseFontSize : 14
+  const safeHeaderFontSize = Number.isFinite(headerFontSize) && headerFontSize > 0 ? headerFontSize : safeBaseFontSize
+  const safeValueFontSize = Number.isFinite(valueFontSize) && valueFontSize > 0 ? valueFontSize : safeBaseFontSize
+  const fontFamily =
+    config.font_family && config.font_family !== "custom"
+      ? config.font_family
+      : (config.custom_font_family || "'Open Sans', Arial, sans-serif")
 
   const style = document.createElement("style")
   style.textContent = `
@@ -535,8 +637,17 @@ function addStyles(element, config) {
       height: 100%;
       overflow: auto;
       box-sizing: border-box;
-      font-family: 'Open Sans', Arial, sans-serif;
+      font-family: ${fontFamily};
+      font-size: ${safeBaseFontSize}px;
       color: #111827;
+    }
+
+    .acme-pivot-plus th {
+      font-size: ${safeHeaderFontSize}px;
+    }
+
+    .acme-pivot-plus td {
+      font-size: ${safeValueFontSize}px;
     }
 
     .acme-pivot-plus table {
@@ -582,12 +693,67 @@ function addStyles(element, config) {
   element.appendChild(style)
 }
 
-function addHeaderRow(table, dimensions, valueColumns, config, rules) {
+function addHeaderRow(table, dimensions, measures, pivots, valueColumns, config, rules) {
   const thead = document.createElement("thead")
-  const row = document.createElement("tr")
+  const hasRealPivots = pivots.some((pivot) => pivot.key !== NO_PIVOT_KEY)
+  const splitPivotHeaders = config.split_pivot_headers !== false && hasRealPivots
+
+  if (!splitPivotHeaders) {
+    const row = document.createElement("tr")
+
+    dimensions.forEach((dimension, index) => {
+      const th = document.createElement("th")
+      th.textContent = dimension.label_short ?? dimension.label
+      const context = {
+        target: "header",
+        dimension: dimension.name,
+        measure: null,
+        pivotKey: null,
+        rowLevel: index + 1,
+        subtotalLevel: null
+      }
+      const style = styleFromRules(rules, context)
+      applyCellStyle(th, style, {
+        align: getDimensionAlignment(config, index),
+        bgColor: config.header_bg_color,
+        fontColor: config.header_font_color,
+        bold: config.header_bold !== false
+      })
+      row.appendChild(th)
+    })
+
+    valueColumns.forEach((column) => {
+      const th = document.createElement("th")
+      th.textContent = column.label
+      const context = {
+        target: "header",
+        dimension: null,
+        measure: column.measureName,
+        pivotKey: column.pivotKey,
+        rowLevel: null,
+        subtotalLevel: null
+      }
+      const style = styleFromRules(rules, context)
+      applyCellStyle(th, style, {
+        align: getMeasureAlignment(config, column.measureIndex),
+        bgColor: config.header_bg_color,
+        fontColor: config.header_font_color,
+        bold: config.header_bold !== false
+      })
+      row.appendChild(th)
+    })
+
+    thead.appendChild(row)
+    table.appendChild(thead)
+    return
+  }
+
+  const topRow = document.createElement("tr")
+  const secondRow = document.createElement("tr")
 
   dimensions.forEach((dimension, index) => {
     const th = document.createElement("th")
+    th.rowSpan = 2
     th.textContent = dimension.label_short ?? dimension.label
     const context = {
       target: "header",
@@ -599,36 +765,63 @@ function addHeaderRow(table, dimensions, valueColumns, config, rules) {
     }
     const style = styleFromRules(rules, context)
     applyCellStyle(th, style, {
-      align: config.header_align,
+      align: getDimensionAlignment(config, index),
       bgColor: config.header_bg_color,
       fontColor: config.header_font_color,
       bold: config.header_bold !== false
     })
-    row.appendChild(th)
+    topRow.appendChild(th)
   })
 
+  const groups = []
+  const groupMap = new Map()
   valueColumns.forEach((column) => {
-    const th = document.createElement("th")
-    th.textContent = column.label
-    const context = {
-      target: "header",
-      dimension: null,
-      measure: column.measureName,
-      pivotKey: column.pivotKey,
-      rowLevel: null,
-      subtotalLevel: null
+    const key = column.pivotLabel || "Value"
+    if (!groupMap.has(key)) {
+      const group = { label: key, columns: [] }
+      groupMap.set(key, group)
+      groups.push(group)
     }
-    const style = styleFromRules(rules, context)
-    applyCellStyle(th, style, {
+    groupMap.get(key).columns.push(column)
+  })
+
+  groups.forEach((group) => {
+    const thGroup = document.createElement("th")
+    thGroup.colSpan = group.columns.length
+    thGroup.textContent = group.label
+    applyCellStyle(thGroup, {}, {
       align: config.header_align,
       bgColor: config.header_bg_color,
       fontColor: config.header_font_color,
       bold: config.header_bold !== false
     })
-    row.appendChild(th)
+    topRow.appendChild(thGroup)
+
+    group.columns.forEach((column) => {
+      const th = document.createElement("th")
+      const measure = measures[column.measureIndex]
+      th.textContent = measure?.label_short ?? measure?.label ?? column.measureLabel
+      const context = {
+        target: "header",
+        dimension: null,
+        measure: column.measureName,
+        pivotKey: column.pivotKey,
+        rowLevel: null,
+        subtotalLevel: null
+      }
+      const style = styleFromRules(rules, context)
+      applyCellStyle(th, style, {
+        align: getMeasureAlignment(config, column.measureIndex),
+        bgColor: config.header_bg_color,
+        fontColor: config.header_font_color,
+        bold: config.header_bold !== false
+      })
+      secondRow.appendChild(th)
+    })
   })
 
-  thead.appendChild(row)
+  thead.appendChild(topRow)
+  thead.appendChild(secondRow)
   table.appendChild(thead)
 }
 
@@ -648,6 +841,7 @@ function addSubtotalRow({
   tbody,
   node,
   dimensions,
+  pivots,
   valueColumns,
   measuresMap,
   measureFormats,
@@ -693,7 +887,7 @@ function addSubtotalRow({
     const ruleStyle = styleFromRules(rules, context)
     const levelStyle = config.subtotalLevelStyles[node.level] || {}
     applyCellStyle(td, { ...levelStyle, ...ruleStyle }, {
-      align: config.value_align,
+      align: getDimensionAlignment(config, index),
       bgColor: config.subtotal_bg_color,
       fontColor: config.subtotal_font_color,
       bold: config.subtotal_bold !== false
@@ -704,7 +898,7 @@ function addSubtotalRow({
 
   valueColumns.forEach((column) => {
     const td = document.createElement("td")
-    const value = node.totals[column.measureName][column.pivotKey]
+    const value = getColumnNumericValue(node.totals, column, pivots)
     if (showSubtotal) {
       const measure = measuresMap.get(column.measureName)
       const measureConfig = measureFormats[column.measureName]
@@ -723,7 +917,7 @@ function addSubtotalRow({
     const thresholdStyle = styleFromThresholdRules(thresholdRules, context, value)
     const levelStyle = config.subtotalLevelStyles[node.level] || {}
     applyCellStyle(td, { ...levelStyle, ...ruleStyle, ...thresholdStyle }, {
-      align: config.value_align,
+      align: getMeasureAlignment(config, column.measureIndex),
       bgColor: config.subtotal_bg_color,
       fontColor: config.subtotal_font_color,
       bold: config.subtotal_bold !== false
@@ -741,13 +935,15 @@ function addDetailRow({
   tbody,
   detailRow,
   dimensions,
+  pivots,
   valueColumns,
   measuresMap,
   measureFormats,
   defaultLocale,
   config,
   rules,
-  thresholdRules
+  thresholdRules,
+  lastDetailDimensions
 }) {
   const tr = document.createElement("tr")
   tr.dataset.rowType = "value"
@@ -755,7 +951,13 @@ function addDetailRow({
   dimensions.forEach((dimension, index) => {
     const td = document.createElement("td")
     td.className = "acme-pivot-plus__dim-cell"
-    td.textContent = detailRow.dimensions[index] || ""
+    const showValue = shouldDisplayDimensionValue(
+      lastDetailDimensions.value,
+      detailRow.dimensions,
+      index,
+      config.repeat_dimension_values
+    )
+    td.textContent = showValue ? (detailRow.dimensions[index] || "") : ""
 
     const context = {
       target: "value",
@@ -767,7 +969,7 @@ function addDetailRow({
     }
     const style = styleFromRules(rules, context)
     applyCellStyle(td, style, {
-      align: config.value_align,
+      align: getDimensionAlignment(config, index),
       bgColor: config.value_bg_color,
       fontColor: config.value_font_color,
       bold: config.value_bold === true
@@ -779,7 +981,7 @@ function addDetailRow({
     const td = document.createElement("td")
     const measure = measuresMap.get(column.measureName)
     const measureConfig = measureFormats[column.measureName]
-    const value = detailRow.values[column.measureName][column.pivotKey]
+    const value = getColumnNumericValue(detailRow.values, column, pivots)
     td.textContent = formatValue(measure, value, measureConfig, defaultLocale)
 
     const context = {
@@ -793,7 +995,7 @@ function addDetailRow({
     const style = styleFromRules(rules, context)
     const thresholdStyle = styleFromThresholdRules(thresholdRules, context, value)
     applyCellStyle(td, { ...style, ...thresholdStyle }, {
-      align: config.value_align,
+      align: getMeasureAlignment(config, column.measureIndex),
       bgColor: config.value_bg_color,
       fontColor: config.value_font_color,
       bold: config.value_bold === true
@@ -802,12 +1004,14 @@ function addDetailRow({
   })
 
   tbody.appendChild(tr)
+  lastDetailDimensions.value = detailRow.dimensions.slice()
 }
 
 function renderNode({
   tbody,
   node,
   dimensions,
+  pivots,
   valueColumns,
   measuresMap,
   measureFormats,
@@ -817,7 +1021,8 @@ function renderNode({
   thresholdRules,
   subtotalLevels,
   subtotalDimensions,
-  expandedNodes
+  expandedNodes,
+  lastDetailDimensions
 }) {
   const showSubtotal =
     config.enable_subtotals !== false &&
@@ -831,13 +1036,15 @@ function renderNode({
         tbody,
         detailRow,
         dimensions,
+        pivots,
         valueColumns,
         measuresMap,
         measureFormats,
         defaultLocale,
         config,
         rules,
-        thresholdRules
+        thresholdRules,
+        lastDetailDimensions
       })
     })
     return
@@ -848,6 +1055,7 @@ function renderNode({
     node,
     dimensions,
     valueColumns,
+    pivots,
     measuresMap,
     measureFormats,
     defaultLocale,
@@ -858,6 +1066,10 @@ function renderNode({
     showSubtotal
   })
 
+  if (showSubtotal) {
+    lastDetailDimensions.value = null
+  }
+
   if (!expanded) return
 
   if (node.children.size) {
@@ -866,6 +1078,7 @@ function renderNode({
         tbody,
         node: child,
         dimensions,
+        pivots,
         valueColumns,
         measuresMap,
         measureFormats,
@@ -875,7 +1088,8 @@ function renderNode({
         thresholdRules,
         subtotalLevels,
         subtotalDimensions,
-        expandedNodes
+        expandedNodes,
+        lastDetailDimensions
       })
     })
     return
@@ -888,15 +1102,84 @@ function renderNode({
       tbody,
       detailRow,
       dimensions,
+      pivots,
       valueColumns,
       measuresMap,
       measureFormats,
       defaultLocale,
       config,
       rules,
-      thresholdRules
+      thresholdRules,
+      lastDetailDimensions
     })
   })
+}
+
+function addColumnTotalsRow({
+  table,
+  dimensions,
+  pivots,
+  valueColumns,
+  measuresMap,
+  measureFormats,
+  defaultLocale,
+  rootTotals,
+  config,
+  rules,
+  thresholdRules
+}) {
+  const tfoot = document.createElement("tfoot")
+  const tr = document.createElement("tr")
+
+  dimensions.forEach((dimension, index) => {
+    const td = document.createElement("td")
+    td.textContent = index === 0 ? "Total" : ""
+    const context = {
+      target: "subtotal",
+      dimension: dimension.name,
+      measure: null,
+      pivotKey: null,
+      rowLevel: null,
+      subtotalLevel: 0
+    }
+    const style = styleFromRules(rules, context)
+    applyCellStyle(td, style, {
+      align: getDimensionAlignment(config, index),
+      bgColor: config.subtotal_bg_color,
+      fontColor: config.subtotal_font_color,
+      bold: true
+    })
+    tr.appendChild(td)
+  })
+
+  valueColumns.forEach((column) => {
+    const td = document.createElement("td")
+    const value = getColumnNumericValue(rootTotals, column, pivots)
+    const measure = measuresMap.get(column.measureName)
+    const measureConfig = measureFormats[column.measureName]
+    td.textContent = formatValue(measure, value, measureConfig, defaultLocale)
+
+    const context = {
+      target: "subtotal",
+      dimension: null,
+      measure: column.measureName,
+      pivotKey: column.pivotKey,
+      rowLevel: null,
+      subtotalLevel: 0
+    }
+    const style = styleFromRules(rules, context)
+    const thresholdStyle = styleFromThresholdRules(thresholdRules, context, value)
+    applyCellStyle(td, { ...style, ...thresholdStyle }, {
+      align: getMeasureAlignment(config, column.measureIndex),
+      bgColor: config.subtotal_bg_color,
+      fontColor: config.subtotal_font_color,
+      bold: true
+    })
+    tr.appendChild(td)
+  })
+
+  tfoot.appendChild(tr)
+  table.appendChild(tfoot)
 }
 
 const BASE_OPTIONS = {
@@ -948,6 +1231,62 @@ const BASE_OPTIONS = {
     values: [{ left: "left" }, { center: "center" }, { right: "right" }]
   },
   value_bold: { type: "boolean", label: "Values bold", default: false },
+  repeat_dimension_values: {
+    type: "boolean",
+    label: "Repeat dimension values",
+    default: false
+  },
+  split_pivot_headers: {
+    type: "boolean",
+    label: "Split pivot headers",
+    default: true
+  },
+  show_row_totals: {
+    type: "boolean",
+    label: "Show row totals",
+    default: false
+  },
+  show_column_totals: {
+    type: "boolean",
+    label: "Show column totals",
+    default: false
+  },
+  font_family: {
+    type: "string",
+    display: "select",
+    label: "Font family",
+    default: "'Open Sans', Arial, sans-serif",
+    values: [
+      { "'Open Sans', Arial, sans-serif": "Open Sans" },
+      { "'Lato', Arial, sans-serif": "Lato" },
+      { "'Montserrat', Arial, sans-serif": "Montserrat" },
+      { "'Source Sans 3', Arial, sans-serif": "Source Sans 3" },
+      { "'Nunito Sans', Arial, sans-serif": "Nunito Sans" },
+      { "'Merriweather', Georgia, serif": "Merriweather" },
+      { "'Roboto Slab', Georgia, serif": "Roboto Slab" },
+      { custom: "Custom" }
+    ]
+  },
+  custom_font_family: {
+    type: "string",
+    label: "Custom font family",
+    default: "'Open Sans', Arial, sans-serif"
+  },
+  font_size_px: {
+    type: "number",
+    label: "Font size",
+    default: 14
+  },
+  header_font_size_px: {
+    type: "number",
+    label: "Header font size",
+    default: 14
+  },
+  value_font_size_px: {
+    type: "number",
+    label: "Value font size",
+    default: 14
+  },
 
   enable_subtotals: { type: "boolean", label: "Enable subtotals", default: true },
   subtotal_levels: {
@@ -1077,7 +1416,7 @@ looker.plugins.visualizations.add({
       : "el-GR"
     const includeMeasureControls = config.enable_measure_format_controls !== false
 
-    registerMeasureFormatOptions(this, measures, defaultLocale, includeMeasureControls)
+    registerMeasureFormatOptions(this, dimensions, measures, defaultLocale, includeMeasureControls)
 
     const rules = parseJsonArray(config.style_rules_json, [])
     const thresholdRules = parseJsonArray(config.threshold_rules_json, [])
@@ -1099,7 +1438,7 @@ looker.plugins.visualizations.add({
     const finalConfig = applyPresetConfig(parsedConfig)
 
     const pivots = getPivotEntries(queryResponse)
-    const valueColumns = buildValueColumns(measures, pivots)
+    const valueColumns = buildValueColumns(measures, pivots, finalConfig.show_row_totals === true)
     const tree = buildTree(data, dimensions, measures, pivots)
     const subtotalLevels = parseSubtotalLevels(config.subtotal_levels, dimensions.length)
     const subtotalDimensions = parseSubtotalDimensions(config.subtotal_dimensions, dimensions)
@@ -1111,14 +1450,16 @@ looker.plugins.visualizations.add({
       addStyles(wrapper, finalConfig)
 
       const table = document.createElement("table")
-      addHeaderRow(table, dimensions, valueColumns, finalConfig, rules)
+      addHeaderRow(table, dimensions, measures, pivots, valueColumns, finalConfig, rules)
       const tbody = document.createElement("tbody")
+      const lastDetailDimensions = { value: null }
 
       tree.children.forEach((node) => {
         renderNode({
           tbody,
           node,
           dimensions,
+          pivots,
           valueColumns,
           measuresMap,
           measureFormats,
@@ -1128,11 +1469,27 @@ looker.plugins.visualizations.add({
           thresholdRules,
           subtotalLevels,
           subtotalDimensions,
-          expandedNodes
+          expandedNodes,
+          lastDetailDimensions
         })
       })
 
       table.appendChild(tbody)
+      if (finalConfig.show_column_totals === true) {
+        addColumnTotalsRow({
+          table,
+          dimensions,
+          pivots,
+          valueColumns,
+          measuresMap,
+          measureFormats,
+          defaultLocale,
+          rootTotals: tree.totals,
+          config: finalConfig,
+          rules,
+          thresholdRules
+        })
+      }
       wrapper.appendChild(table)
     }
 
