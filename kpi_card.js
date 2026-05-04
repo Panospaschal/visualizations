@@ -9,9 +9,6 @@ function loadScript(url, callback) {
 looker.plugins.visualizations.add({
     id: "panos_kpi_card_advanced",
     label: "ADR Advanced KPI Card",
-    
-    // ΑΥΤΗ ΕΙΝΑΙ Η ΜΑΓΙΚΗ ΕΝΤΟΛΗ ΠΟΥ ΕΛΕΙΠΕ!
-    // Λέει στο Looker να μας στείλει τα Totals στον κώδικα
     has_totals: true, 
     
     create: function(element, config) {
@@ -44,7 +41,6 @@ looker.plugins.visualizations.add({
                 .neutral-badge { background-color: #f1f3f4; color: #5f6368; }
 
                 .chart-container { flex-grow: 1; position: relative; width: 100%; min-height: 70px; margin-top: auto;}
-                .error-msg { color: #d93025; font-size: 13px; text-align: center; padding: 15px; background: #fce8e6; border-radius: 8px; border: 1px solid #fad2cf;}
             </style>
             <div id="kpi-container">
                 <div class="kpi-header">
@@ -58,7 +54,7 @@ looker.plugins.visualizations.add({
                         <span class="badge" id="yoy-badge">...</span> vs Last Year YTD
                     </div>
                     <div class="kpi-sub-value" id="mom-comparison">
-                        <span class="badge" id="mom-badge">...</span> vs Last Month
+                        <span class="badge" id="mom-badge">...</span> <span id="mom-text">vs Last Month</span>
                     </div>
                 </div>
 
@@ -74,17 +70,12 @@ looker.plugins.visualizations.add({
         var dimensions = queryResponse.fields.dimension_like;
         var measures = queryResponse.fields.measure_like;
 
-        if (dimensions.length === 0 || measures.length < 2) {
-            element.querySelector("#kpi-container").innerHTML = `<div class="error-msg"><b>Λάθος Δεδομένα:</b> Χρειάζομαι 1 Dimension (Μήνα) και 2 Measures (Φετινό, Περσινό).</div>`;
-            done(); return;
-        }
+        if (dimensions.length === 0 || measures.length < 2) { done(); return; }
 
         var dimMonth = dimensions[0].name;
         var measureCurrent = measures[0].name; 
         var measurePast = measures[1].name;    
 
-        // --- ΔΙΑΒΑΣΜΑ ΤΩΝ TOTALS ---
-        // Τώρα που βάλαμε το has_totals: true, το Looker θα μας τα στείλει!
         var currentYearTotal = 0;
         var pastYearTotal = 0;
         var formattedTotal = "€0.00";
@@ -94,7 +85,6 @@ looker.plugins.visualizations.add({
             pastYearTotal = Number(queryResponse.totals_data[measurePast].value) || 0;
             formattedTotal = queryResponse.totals_data[measureCurrent].rendered || ("€" + currentYearTotal.toFixed(2));
         } else {
-            // Αν για κάποιο λόγο δεν έρθουν τα totals (π.χ. ο χρήστης ξε-τσέκαρε το κουτάκι), τα υπολογίζουμε εμείς με το χέρι!
             data.forEach(function(row) {
                 currentYearTotal += Number(row[measureCurrent].value) || 0;
                 pastYearTotal += Number(row[measurePast].value) || 0;
@@ -102,10 +92,8 @@ looker.plugins.visualizations.add({
             formattedTotal = "€" + currentYearTotal.toFixed(2);
         }
         
-        // Εμφάνιση Κεντρικού YTD
         element.querySelector("#kpi-value").innerHTML = formattedTotal;
 
-        // YTD vs Last Year
         var yoyBadge = element.querySelector("#yoy-badge");
         if (pastYearTotal > 0) {
             var yoyDiff = currentYearTotal - pastYearTotal;
@@ -116,13 +104,11 @@ looker.plugins.visualizations.add({
             yoyBadge.innerHTML = "-"; yoyBadge.className = "badge neutral-badge";
         }
 
-        // Διαβάζουμε τα δεδομένα ανά μήνα για το Γράφημα και το MoM
         var currentValues = [];
         var labels = [];
         
         data.forEach(function(row) {
             var val = row[measureCurrent].value;
-            // Παίρνουμε τους μήνες που έχουν δεδομένα (όχι null)
             if(val !== null && val !== undefined) { 
                 var rawDim = row[dimMonth].rendered || row[dimMonth].value;
                 labels.push(String(rawDim).replace(/(<([^>]+)>)/gi, "").substring(0, 3)); 
@@ -130,21 +116,48 @@ looker.plugins.visualizations.add({
             }
         });
 
-        // MoM (Τελευταίος μήνας vs Προηγούμενος)
-        var currentMonthValue = currentValues.length > 0 ? currentValues[currentValues.length - 1] : 0;
-        var previousMonthValue = currentValues.length > 1 ? currentValues[currentValues.length - 2] : 0;
+        // --- ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΠΡΑΓΜΑΤΙΚΟΥ ΜΗΝΑ ---
+        // 1. Βρίσκουμε ποιον μήνα έχουμε ΤΩΡΑ στο ημερολόγιο
+        var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        var currentRealMonth = monthNames[new Date().getMonth()]; // Αυτό τώρα θα δώσει "May"
+
+        // 2. Ψάχνουμε να βρούμε τον Μάιο (ή τον εκάστοτε μήνα) μέσα στη λίστα του Looker
+        var indexOfCurrentMonth = labels.indexOf(currentRealMonth);
+        
+        var currentMonthValue = 0;
+        var previousMonthValue = 0;
+        var comparisonText = "vs Last Month";
+
+        if (indexOfCurrentMonth !== -1) {
+            // Αν βρήκαμε τον μήνα (π.χ. τον Μάιο)
+            currentMonthValue = currentValues[indexOfCurrentMonth];
+            
+            if (indexOfCurrentMonth > 0) {
+                // Παίρνουμε τον ακριβώς προηγούμενο από αυτόν (δηλαδή τον Απρίλιο)
+                previousMonthValue = currentValues[indexOfCurrentMonth - 1];
+                comparisonText = "vs " + labels[indexOfCurrentMonth - 1] + " (" + currentRealMonth + " vs " + labels[indexOfCurrentMonth - 1] + ")";
+            }
+        } else {
+            // Fallback: Αν δεν βρει τον τρέχοντα μήνα, παίρνει τις τελευταίες γραμμές
+            currentMonthValue = currentValues.length > 0 ? currentValues[currentValues.length - 1] : 0;
+            previousMonthValue = currentValues.length > 1 ? currentValues[currentValues.length - 2] : 0;
+        }
+
         var momBadge = element.querySelector("#mom-badge");
+        element.querySelector("#mom-text").innerHTML = "vs Last Month"; 
 
         if (previousMonthValue > 0) {
             var momDiff = currentMonthValue - previousMonthValue;
             var momPct = ((momDiff / previousMonthValue) * 100).toFixed(1);
             momBadge.innerHTML = (momDiff > 0 ? "+" : "") + momPct + "%";
             momBadge.className = "badge " + (momDiff >= 0 ? "positive-badge" : "negative-badge");
+            
+            // Προαιρετικό: Εμφανίζει δίπλα μικρά γράμματα ποιους μήνες συγκρίνει για να είσαι σίγουρος!
+            element.querySelector("#mom-text").innerHTML = `vs Last Month <span style="font-size: 10px; color: #bdc1c6;">(${currentRealMonth} vs ${indexOfCurrentMonth > 0 ? labels[indexOfCurrentMonth-1] : 'N/A'})</span>`;
         } else {
             momBadge.innerHTML = "-"; momBadge.className = "badge neutral-badge";
         }
 
-        // Σχεδιασμός Γραφήματος
         var drawChart = () => {
             var ctx = element.querySelector("#kpi-chart").getContext("2d");
             if (this._chartInstance) { this._chartInstance.destroy(); }
