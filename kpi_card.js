@@ -10,6 +10,10 @@ looker.plugins.visualizations.add({
     id: "panos_kpi_card_advanced",
     label: "ADR Advanced KPI Card",
     
+    // ΑΥΤΗ ΕΙΝΑΙ Η ΜΑΓΙΚΗ ΕΝΤΟΛΗ ΠΟΥ ΕΛΕΙΠΕ!
+    // Λέει στο Looker να μας στείλει τα Totals στον κώδικα
+    has_totals: true, 
+    
     create: function(element, config) {
         element.innerHTML = `
             <style>
@@ -74,28 +78,36 @@ looker.plugins.visualizations.add({
             element.querySelector("#kpi-container").innerHTML = `<div class="error-msg"><b>Λάθος Δεδομένα:</b> Χρειάζομαι 1 Dimension (Μήνα) και 2 Measures (Φετινό, Περσινό).</div>`;
             done(); return;
         }
-        
-        // Ο ΕΞΥΠΝΟΣ ΕΛΕΓΧΟΣ ΓΙΑ ΤΟ CACHE
-        if (!queryResponse.totals_data) {
-             element.querySelector("#kpi-container").innerHTML = `<div class="error-msg"><b>Το Looker κόλλησε!</b><br><br>Πάτα το βελάκι δίπλα στο κουμπί Run (πάνω δεξιά) και επέλεξε <b>Clear Cache & Refresh</b> για να εμφανιστούν τα Totals.</div>`;
-             done(); return;
-        }
 
         var dimMonth = dimensions[0].name;
         var measureCurrent = measures[0].name; 
         var measurePast = measures[1].name;    
 
-        // Συνολικά Νούμερα (Totals)
-        var currentYearTotal = Number(queryResponse.totals_data[measureCurrent].value);
-        var pastYearTotal = Number(queryResponse.totals_data[measurePast].value);
+        // --- ΔΙΑΒΑΣΜΑ ΤΩΝ TOTALS ---
+        // Τώρα που βάλαμε το has_totals: true, το Looker θα μας τα στείλει!
+        var currentYearTotal = 0;
+        var pastYearTotal = 0;
+        var formattedTotal = "€0.00";
+
+        if (queryResponse.totals_data) {
+            currentYearTotal = Number(queryResponse.totals_data[measureCurrent].value) || 0;
+            pastYearTotal = Number(queryResponse.totals_data[measurePast].value) || 0;
+            formattedTotal = queryResponse.totals_data[measureCurrent].rendered || ("€" + currentYearTotal.toFixed(2));
+        } else {
+            // Αν για κάποιο λόγο δεν έρθουν τα totals (π.χ. ο χρήστης ξε-τσέκαρε το κουτάκι), τα υπολογίζουμε εμείς με το χέρι!
+            data.forEach(function(row) {
+                currentYearTotal += Number(row[measureCurrent].value) || 0;
+                pastYearTotal += Number(row[measurePast].value) || 0;
+            });
+            formattedTotal = "€" + currentYearTotal.toFixed(2);
+        }
         
-        // Format του κεντρικού αριθμού
-        var formattedTotal = queryResponse.totals_data[measureCurrent].rendered || ("€" + currentYearTotal.toFixed(2));
+        // Εμφάνιση Κεντρικού YTD
         element.querySelector("#kpi-value").innerHTML = formattedTotal;
 
-        // YTD vs Last Year (Συνολικό)
+        // YTD vs Last Year
         var yoyBadge = element.querySelector("#yoy-badge");
-        if (pastYearTotal && pastYearTotal > 0) {
+        if (pastYearTotal > 0) {
             var yoyDiff = currentYearTotal - pastYearTotal;
             var yoyPct = ((yoyDiff / pastYearTotal) * 100).toFixed(1);
             yoyBadge.innerHTML = (yoyDiff > 0 ? "+" : "") + yoyPct + "%";
@@ -104,15 +116,17 @@ looker.plugins.visualizations.add({
             yoyBadge.innerHTML = "-"; yoyBadge.className = "badge neutral-badge";
         }
 
-        // Διαβάζουμε τα δεδομένα ανά μήνα
+        // Διαβάζουμε τα δεδομένα ανά μήνα για το Γράφημα και το MoM
         var currentValues = [];
         var labels = [];
         
         data.forEach(function(row) {
-            if(row[measureCurrent].value !== null) { // Αγνοούμε τους μήνες που δεν έχουν έρθει ακόμα
+            var val = row[measureCurrent].value;
+            // Παίρνουμε τους μήνες που έχουν δεδομένα (όχι null)
+            if(val !== null && val !== undefined) { 
                 var rawDim = row[dimMonth].rendered || row[dimMonth].value;
                 labels.push(String(rawDim).replace(/(<([^>]+)>)/gi, "").substring(0, 3)); 
-                currentValues.push(Number(row[measureCurrent].value));
+                currentValues.push(Number(val));
             }
         });
 
@@ -142,13 +156,13 @@ looker.plugins.visualizations.add({
                     datasets: [{
                         data: currentValues,
                         borderColor: '#1a73e8',
-                        backgroundColor: 'rgba(26, 115, 232, 0.1)', // Απαλό γαλάζιο γέμισμα
+                        backgroundColor: 'rgba(26, 115, 232, 0.1)', 
                         borderWidth: 2.5,
                         pointBackgroundColor: '#1a73e8',
                         pointRadius: 0,
                         pointHoverRadius: 5,
                         fill: true,
-                        tension: 0.3 // Απαλή καμπύλη
+                        tension: 0.3 
                     }]
                 },
                 options: {
