@@ -11,7 +11,6 @@ looker.plugins.visualizations.add({
     label: "Universal KPI Card",
     has_totals: true, 
     
-    // Αφαιρέθηκε η επιλογή για το Icon από το μενού
     options: {
         kpi_title: { type: "string", label: "Τίτλος Κάρτας", default: "ΜΕΤΡΗΣΗ" },
         value_format: {
@@ -22,7 +21,6 @@ looker.plugins.visualizations.add({
     },
 
     create: function(element, config) {
-        // Αφαιρέθηκε το span του Icon από το HTML
         element.innerHTML = `
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -63,24 +61,38 @@ looker.plugins.visualizations.add({
         var formatChoice = config.value_format || "auto";
         element.querySelector("#kpi-title").innerText = config.kpi_title || "METRIC";
 
+        // ΝΕΑ ΣΥΝΑΡΤΗΣΗ ΜΟΡΦΟΠΟΙΗΣΗΣ (Τελεία στις χιλιάδες, κόμμα στα δεκαδικά)
         function formatVal(val, renderedStr) {
             if (formatChoice === "auto" && renderedStr) return renderedStr;
-            if (formatChoice === "euro") return "€" + Number(val).toFixed(2);
-            if (formatChoice === "percent") {
-                var pctVal = (Number(val) <= 1.2 && Number(val) > -1.2) ? Number(val) * 100 : Number(val);
-                return pctVal.toFixed(1) + "%";
-            }
-            if (formatChoice === "number") return Number(val).toLocaleString();
-            return renderedStr || Number(val).toLocaleString();
+            
+            var num = Number(val);
+            var isPct = formatChoice === "percent";
+            var isEur = formatChoice === "euro";
+            
+            if (isPct) { num = (num <= 1.2 && num >= -1.2) ? num * 100 : num; }
+            
+            var isInteger = Math.floor(num) === num;
+            var decimals = isEur ? 2 : (isPct ? 1 : (isInteger ? 0 : 2));
+            
+            var parts = num.toFixed(decimals).split('.');
+            var intPart = parts[0];
+            var decPart = parts.length > 1 ? parts[1] : '';
+            
+            // Προσθήκη τελείας ανά 3 ψηφία
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            
+            var finalStr = decPart ? (intPart + "," + decPart) : intPart;
+            
+            if (isEur) return "€" + finalStr;
+            if (isPct) return finalStr + "%";
+            return finalStr;
         }
 
         var labels = [];
         var chartValues = [];
         var tooltips = [];
 
-        // ==========================================
-        // ΛΕΙΤΟΥΡΓΙΑ 1: ΓΡΑΜΜΕΣ (Π.χ. Pickup 3 days)
-        // ==========================================
+        // ΛΕΙΤΟΥΡΓΙΑ 1: ΓΡΑΜΜΕΣ (Pickup)
         if (measures.length === 1 && data.length >= 2) {
             var dimName = dimensions[0].name;
             var measureName = measures[0].name;
@@ -99,9 +111,9 @@ looker.plugins.visualizations.add({
             if (data.length >= 3 && valLY > 0) {
                 var diff1 = valCurrent - valLY;
                 var pct1 = ((diff1 / valLY) * 100).toFixed(1);
-                badge1.innerHTML = (diff1 > 0 ? "+" : "") + pct1 + "%";
+                badge1.innerHTML = (diff1 > 0 ? "+" : "") + pct1.replace(".", ",") + "%";
                 badge1.className = "badge " + (diff1 >= 0 ? "positive-badge" : "negative-badge");
-                element.querySelector("#text-1").innerHTML = `vs ${nameLY} <span style="font-size:10px; color:#bdc1c6;">(${valCurrent} vs ${valLY})</span>`;
+                element.querySelector("#text-1").innerHTML = `vs ${nameLY} <span style="font-size:10px; color:#bdc1c6;">(${formatVal(valCurrent)} vs ${formatVal(valLY)})</span>`;
             } else {
                 badge1.innerHTML = "-"; badge1.className = "badge neutral-badge";
                 element.querySelector("#text-1").innerHTML = `vs Last Year`;
@@ -111,9 +123,9 @@ looker.plugins.visualizations.add({
             if (data.length >= 2 && valPrev > 0) {
                 var diff2 = valCurrent - valPrev;
                 var pct2 = ((diff2 / valPrev) * 100).toFixed(1);
-                badge2.innerHTML = (diff2 > 0 ? "+" : "") + pct2 + "%";
+                badge2.innerHTML = (diff2 > 0 ? "+" : "") + pct2.replace(".", ",") + "%";
                 badge2.className = "badge " + (diff2 >= 0 ? "positive-badge" : "negative-badge");
-                element.querySelector("#text-2").innerHTML = `vs ${namePrev} <span style="font-size:10px; color:#bdc1c6;">(${valCurrent} vs ${valPrev})</span>`;
+                element.querySelector("#text-2").innerHTML = `vs ${namePrev} <span style="font-size:10px; color:#bdc1c6;">(${formatVal(valCurrent)} vs ${formatVal(valPrev)})</span>`;
             } else {
                 badge2.innerHTML = "-"; badge2.className = "badge neutral-badge";
                 element.querySelector("#text-2").innerHTML = `vs Previous`;
@@ -125,9 +137,7 @@ looker.plugins.visualizations.add({
                 tooltips.push(formatVal(data[i][measureName].value, data[i][measureName].rendered));
             }
         } 
-        // ==========================================
-        // ΛΕΙΤΟΥΡΓΙΑ 2: ΣΤΗΛΕΣ (Π.χ. YTD ADR/Occupancy)
-        // ==========================================
+        // ΛΕΙΤΟΥΡΓΙΑ 2: ΣΤΗΛΕΣ (YTD)
         else if (measures.length >= 2) {
             var dimMonth = dimensions[0].name;
             var measureCurrent = measures[0].name; 
@@ -147,7 +157,7 @@ looker.plugins.visualizations.add({
             if (pastYearTotal > 0) {
                 var yoyDiff = currentYearTotal - pastYearTotal;
                 var yoyPct = ((yoyDiff / pastYearTotal) * 100).toFixed(1);
-                badge1.innerHTML = (yoyDiff > 0 ? "+" : "") + yoyPct + "%";
+                badge1.innerHTML = (yoyDiff > 0 ? "+" : "") + yoyPct.replace(".", ",") + "%";
                 badge1.className = "badge " + (yoyDiff >= 0 ? "positive-badge" : "negative-badge");
                 element.querySelector("#text-1").innerHTML = `vs Last Year YTD`;
             } else {
@@ -173,7 +183,7 @@ looker.plugins.visualizations.add({
             if (previousMonthValue > 0) {
                 var momDiff = currentMonthValue - previousMonthValue;
                 var momPct = ((momDiff / previousMonthValue) * 100).toFixed(1);
-                badge2.innerHTML = (momDiff > 0 ? "+" : "") + momPct + "%";
+                badge2.innerHTML = (momDiff > 0 ? "+" : "") + momPct.replace(".", ",") + "%";
                 badge2.className = "badge " + (momDiff >= 0 ? "positive-badge" : "negative-badge");
                 element.querySelector("#text-2").innerHTML = `vs Last Month <span style="font-size: 10px; color: #bdc1c6;">(${currentRealMonth} vs ${idx > 0 ? labels[idx-1] : 'N/A'})</span>`;
             } else {
@@ -181,7 +191,6 @@ looker.plugins.visualizations.add({
             }
         }
 
-        // Ζωγραφική του Γραφήματος
         var drawChart = () => {
             var ctx = element.querySelector("#kpi-chart").getContext("2d");
             if (this._chartInstance) { this._chartInstance.destroy(); }
