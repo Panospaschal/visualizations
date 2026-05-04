@@ -11,9 +11,9 @@ looker.plugins.visualizations.add({
     label: "Universal KPI Card",
     has_totals: true, 
     
+    // Αφαιρέθηκε η επιλογή για το Icon από το μενού
     options: {
         kpi_title: { type: "string", label: "Τίτλος Κάρτας", default: "ΜΕΤΡΗΣΗ" },
-        kpi_icon: { type: "string", label: "Εικονίδιο (Emoji)", default: "📊" },
         value_format: {
             type: "string", label: "Μορφοποίηση Αριθμού", display: "select",
             values: [ {"Αυτόματο": "auto"}, {"Ευρώ (€)": "euro"}, {"Ποσοστό (%)": "percent"}, {"Απλός Αριθμός": "number"} ],
@@ -22,12 +22,12 @@ looker.plugins.visualizations.add({
     },
 
     create: function(element, config) {
+        // Αφαιρέθηκε το span του Icon από το HTML
         element.innerHTML = `
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
                 #kpi-container { font-family: 'Inter', sans-serif; background: #ffffff; border-radius: 12px; padding: 20px 20px 10px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8eaed; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; width: 100%; }
-                .kpi-header { display: flex; justify-content: space-between; align-items: center; color: #5f6368; font-size: 14px; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;}
-                .kpi-icon { font-size: 18px; }
+                .kpi-header { color: #5f6368; font-size: 14px; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;}
                 .kpi-main-value { font-size: 36px; font-weight: 700; color: #202124; margin-bottom: 12px; letter-spacing: -0.5px;}
                 .comparisons-wrapper { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; }
                 .kpi-sub-value { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; color: #5f6368;}
@@ -39,7 +39,7 @@ looker.plugins.visualizations.add({
                 .error-msg { color: #d93025; font-size: 13px; text-align: center; padding: 15px; background: #fce8e6; border-radius: 8px; border: 1px solid #fad2cf;}
             </style>
             <div id="kpi-container">
-                <div class="kpi-header"><span id="kpi-title">...</span><span class="kpi-icon" id="kpi-icon">📊</span></div>
+                <div class="kpi-header"><span id="kpi-title">...</span></div>
                 <div class="kpi-main-value" id="kpi-value">...</div>
                 <div class="comparisons-wrapper">
                     <div class="kpi-sub-value" id="comp-1"><span class="badge" id="badge-1">...</span> <span id="text-1"></span></div>
@@ -62,7 +62,6 @@ looker.plugins.visualizations.add({
 
         var formatChoice = config.value_format || "auto";
         element.querySelector("#kpi-title").innerText = config.kpi_title || "METRIC";
-        element.querySelector("#kpi-icon").innerText = config.kpi_icon || "📊";
 
         function formatVal(val, renderedStr) {
             if (formatChoice === "auto" && renderedStr) return renderedStr;
@@ -81,25 +80,21 @@ looker.plugins.visualizations.add({
 
         // ==========================================
         // ΛΕΙΤΟΥΡΓΙΑ 1: ΓΡΑΜΜΕΣ (Π.χ. Pickup 3 days)
-        // 1 Measure, >1 Γραμμές (Τα δεδομένα συγκρίνονται κάθετα)
         // ==========================================
         if (measures.length === 1 && data.length >= 2) {
             var dimName = dimensions[0].name;
             var measureName = measures[0].name;
 
-            // Παίρνουμε τις τιμές (Γραμμή 0=Current, Γραμμή 1=Prev, Γραμμή 2=LY)
             var valCurrent = data[0] ? Number(data[0][measureName].value) : 0;
             var valPrev = data[1] ? Number(data[1][measureName].value) : 0;
             var valLY = data[2] ? Number(data[2][measureName].value) : 0;
 
-            // Ονόματα από το Dimension (πχ "LY 3 days")
             var nameCurrent = data[0] ? String(data[0][dimName].value).replace(/^[0-9]+\.\s*/, '') : "Current";
             var namePrev = data[1] ? String(data[1][dimName].value).replace(/^[0-9]+\.\s*/, '') : "Previous";
             var nameLY = data[2] ? String(data[2][dimName].value).replace(/^[0-9]+\.\s*/, '') : "Last Year";
 
             element.querySelector("#kpi-value").innerHTML = formatVal(valCurrent, data[0][measureName].rendered);
 
-            // Σύγκριση 1 (Current vs LY - Γραμμή 0 vs Γραμμή 2)
             var badge1 = element.querySelector("#badge-1");
             if (data.length >= 3 && valLY > 0) {
                 var diff1 = valCurrent - valLY;
@@ -112,7 +107,6 @@ looker.plugins.visualizations.add({
                 element.querySelector("#text-1").innerHTML = `vs Last Year`;
             }
 
-            // Σύγκριση 2 (Current vs Prev - Γραμμή 0 vs Γραμμή 1)
             var badge2 = element.querySelector("#badge-2");
             if (data.length >= 2 && valPrev > 0) {
                 var diff2 = valCurrent - valPrev;
@@ -125,7 +119,6 @@ looker.plugins.visualizations.add({
                 element.querySelector("#text-2").innerHTML = `vs Previous`;
             }
 
-            // Για το γράφημα (από το παλιότερο στο νεότερο)
             for (var i = data.length - 1; i >= 0; i--) {
                 labels.push(String(data[i][dimName].value).replace(/^[0-9]+\.\s*/, ''));
                 chartValues.push(Number(data[i][measureName].value));
@@ -134,7 +127,6 @@ looker.plugins.visualizations.add({
         } 
         // ==========================================
         // ΛΕΙΤΟΥΡΓΙΑ 2: ΣΤΗΛΕΣ (Π.χ. YTD ADR/Occupancy)
-        // 2 Measures (Φετινό, Περσινό) (Τα δεδομένα συγκρίνονται οριζόντια)
         // ==========================================
         else if (measures.length >= 2) {
             var dimMonth = dimensions[0].name;
@@ -189,7 +181,7 @@ looker.plugins.visualizations.add({
             }
         }
 
-        // Ζωγραφική του Γραφήματος (Κοινό και για τις 2 λειτουργίες)
+        // Ζωγραφική του Γραφήματος
         var drawChart = () => {
             var ctx = element.querySelector("#kpi-chart").getContext("2d");
             if (this._chartInstance) { this._chartInstance.destroy(); }
