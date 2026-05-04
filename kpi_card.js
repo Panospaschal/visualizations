@@ -7,10 +7,36 @@ function loadScript(url, callback) {
 }
 
 looker.plugins.visualizations.add({
-    id: "panos_kpi_card_advanced",
-    label: "ADR Advanced KPI Card",
+    id: "panos_kpi_card_universal",
+    label: "Universal KPI Card",
     has_totals: true, 
     
+    // ΕΔΩ ΦΤΙΑΧΝΟΥΜΕ ΤΟ ΜΕΝΟΥ ΕΠΙΛΟΓΩΝ ΓΙΑ ΤΟ LOOKER!
+    options: {
+        kpi_title: {
+            type: "string",
+            label: "Τίτλος Κάρτας",
+            default: "YTD METRIC"
+        },
+        kpi_icon: {
+            type: "string",
+            label: "Εικονίδιο (Emoji)",
+            default: "📊"
+        },
+        value_format: {
+            type: "string",
+            label: "Μορφοποίηση Αριθμού",
+            display: "select",
+            values: [
+                {"Αυτόματο (Από LookML)": "auto"},
+                {"Ευρώ (€)": "euro"},
+                {"Ποσοστό (%)": "percent"},
+                {"Απλός Αριθμός": "number"}
+            ],
+            default: "auto"
+        }
+    },
+
     create: function(element, config) {
         element.innerHTML = `
             <style>
@@ -29,7 +55,7 @@ looker.plugins.visualizations.add({
                     width: 100%;
                 }
                 .kpi-header { display: flex; justify-content: space-between; align-items: center; color: #5f6368; font-size: 14px; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;}
-                .kpi-icon { color: #1a73e8; font-size: 18px; }
+                .kpi-icon { font-size: 18px; }
                 .kpi-main-value { font-size: 36px; font-weight: 700; color: #202124; margin-bottom: 12px; letter-spacing: -0.5px;}
                 
                 .comparisons-wrapper { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; }
@@ -44,8 +70,8 @@ looker.plugins.visualizations.add({
             </style>
             <div id="kpi-container">
                 <div class="kpi-header">
-                    <span id="kpi-title">YTD ADR</span>
-                    <span class="kpi-icon">💶</span>
+                    <span id="kpi-title">...</span>
+                    <span class="kpi-icon" id="kpi-icon">📊</span>
                 </div>
                 <div class="kpi-main-value" id="kpi-value">...</div>
                 
@@ -76,24 +102,46 @@ looker.plugins.visualizations.add({
         var measureCurrent = measures[0].name; 
         var measurePast = measures[1].name;    
 
+        // Διάβασμα των επιλογών του χρήστη από το Looker (ή default τιμές)
+        var title = config.kpi_title || "YTD METRIC";
+        var icon = config.kpi_icon || "📊";
+        var formatChoice = config.value_format || "auto";
+
+        element.querySelector("#kpi-title").innerText = title;
+        element.querySelector("#kpi-icon").innerText = icon;
+
+        // Συνάρτηση Μορφοποίησης Αριθμών
+        function formatVal(val, renderedStr) {
+            if (formatChoice === "auto" && renderedStr) return renderedStr;
+            if (formatChoice === "euro") return "€" + Number(val).toFixed(2);
+            if (formatChoice === "percent") {
+                // Αν το Looker στέλνει 0.68 το κάνουμε 68.0%. Αν στέλνει 68, το αφήνουμε 68.0%.
+                var pctVal = (Number(val) <= 1.2 && Number(val) > -1.2) ? Number(val) * 100 : Number(val);
+                return pctVal.toFixed(1) + "%";
+            }
+            if (formatChoice === "number") return Number(val).toFixed(1);
+            return renderedStr || Number(val).toFixed(2);
+        }
+
         var currentYearTotal = 0;
         var pastYearTotal = 0;
-        var formattedTotal = "€0.00";
+        var finalFormattedTotal = "";
 
         if (queryResponse.totals_data) {
             currentYearTotal = Number(queryResponse.totals_data[measureCurrent].value) || 0;
             pastYearTotal = Number(queryResponse.totals_data[measurePast].value) || 0;
-            formattedTotal = queryResponse.totals_data[measureCurrent].rendered || ("€" + currentYearTotal.toFixed(2));
+            finalFormattedTotal = formatVal(currentYearTotal, queryResponse.totals_data[measureCurrent].rendered);
         } else {
             data.forEach(function(row) {
                 currentYearTotal += Number(row[measureCurrent].value) || 0;
                 pastYearTotal += Number(row[measurePast].value) || 0;
             });
-            formattedTotal = "€" + currentYearTotal.toFixed(2);
+            finalFormattedTotal = formatVal(currentYearTotal, null);
         }
         
-        element.querySelector("#kpi-value").innerHTML = formattedTotal;
+        element.querySelector("#kpi-value").innerHTML = finalFormattedTotal;
 
+        // YTD vs Last Year (%)
         var yoyBadge = element.querySelector("#yoy-badge");
         if (pastYearTotal > 0) {
             var yoyDiff = currentYearTotal - pastYearTotal;
@@ -104,7 +152,9 @@ looker.plugins.visualizations.add({
             yoyBadge.innerHTML = "-"; yoyBadge.className = "badge neutral-badge";
         }
 
+        // Δεδομένα Μηνών
         var currentValues = [];
+        var formattedValues = []; // Αποθηκεύει το πώς φαίνεται στο Tooltip!
         var labels = [];
         
         data.forEach(function(row) {
@@ -113,51 +163,41 @@ looker.plugins.visualizations.add({
                 var rawDim = row[dimMonth].rendered || row[dimMonth].value;
                 labels.push(String(rawDim).replace(/(<([^>]+)>)/gi, "").substring(0, 3)); 
                 currentValues.push(Number(val));
+                formattedValues.push(formatVal(val, row[measureCurrent].rendered));
             }
         });
 
-        // --- ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΠΡΑΓΜΑΤΙΚΟΥ ΜΗΝΑ ---
-        // 1. Βρίσκουμε ποιον μήνα έχουμε ΤΩΡΑ στο ημερολόγιο
+        // --- ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΜΗΝΑ ---
         var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        var currentRealMonth = monthNames[new Date().getMonth()]; // Αυτό τώρα θα δώσει "May"
-
-        // 2. Ψάχνουμε να βρούμε τον Μάιο (ή τον εκάστοτε μήνα) μέσα στη λίστα του Looker
+        var currentRealMonth = monthNames[new Date().getMonth()]; 
         var indexOfCurrentMonth = labels.indexOf(currentRealMonth);
         
         var currentMonthValue = 0;
         var previousMonthValue = 0;
-        var comparisonText = "vs Last Month";
 
         if (indexOfCurrentMonth !== -1) {
-            // Αν βρήκαμε τον μήνα (π.χ. τον Μάιο)
             currentMonthValue = currentValues[indexOfCurrentMonth];
-            
             if (indexOfCurrentMonth > 0) {
-                // Παίρνουμε τον ακριβώς προηγούμενο από αυτόν (δηλαδή τον Απρίλιο)
                 previousMonthValue = currentValues[indexOfCurrentMonth - 1];
-                comparisonText = "vs " + labels[indexOfCurrentMonth - 1] + " (" + currentRealMonth + " vs " + labels[indexOfCurrentMonth - 1] + ")";
             }
         } else {
-            // Fallback: Αν δεν βρει τον τρέχοντα μήνα, παίρνει τις τελευταίες γραμμές
             currentMonthValue = currentValues.length > 0 ? currentValues[currentValues.length - 1] : 0;
             previousMonthValue = currentValues.length > 1 ? currentValues[currentValues.length - 2] : 0;
         }
 
         var momBadge = element.querySelector("#mom-badge");
-        element.querySelector("#mom-text").innerHTML = "vs Last Month"; 
-
         if (previousMonthValue > 0) {
             var momDiff = currentMonthValue - previousMonthValue;
             var momPct = ((momDiff / previousMonthValue) * 100).toFixed(1);
             momBadge.innerHTML = (momDiff > 0 ? "+" : "") + momPct + "%";
             momBadge.className = "badge " + (momDiff >= 0 ? "positive-badge" : "negative-badge");
-            
-            // Προαιρετικό: Εμφανίζει δίπλα μικρά γράμματα ποιους μήνες συγκρίνει για να είσαι σίγουρος!
             element.querySelector("#mom-text").innerHTML = `vs Last Month <span style="font-size: 10px; color: #bdc1c6;">(${currentRealMonth} vs ${indexOfCurrentMonth > 0 ? labels[indexOfCurrentMonth-1] : 'N/A'})</span>`;
         } else {
             momBadge.innerHTML = "-"; momBadge.className = "badge neutral-badge";
+            element.querySelector("#mom-text").innerHTML = `vs Last Month`;
         }
 
+        // Γράφημα
         var drawChart = () => {
             var ctx = element.querySelector("#kpi-chart").getContext("2d");
             if (this._chartInstance) { this._chartInstance.destroy(); }
@@ -181,7 +221,17 @@ looker.plugins.visualizations.add({
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { enabled: true, displayColors: false, callbacks: { label: function(context) { return '€' + context.parsed.y.toFixed(2); } } } },
+                    plugins: { 
+                        legend: { display: false }, 
+                        tooltip: { 
+                            enabled: true, 
+                            displayColors: false, 
+                            callbacks: { 
+                                // Παίρνει το σωστά μορφοποιημένο νούμερο για το tooltip!
+                                label: function(context) { return formattedValues[context.dataIndex]; } 
+                            } 
+                        } 
+                    },
                     scales: {
                         x: { display: true, grid: { display: false }, ticks: { font: {family: 'Inter', size: 10}, color: '#9aa0a6' } },
                         y: { display: false, min: Math.min(...currentValues) * 0.95 } 
