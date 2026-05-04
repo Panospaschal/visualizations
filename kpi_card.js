@@ -7,13 +7,13 @@ function loadScript(url, callback) {
 }
 
 looker.plugins.visualizations.add({
-    id: "panos_kpi_card_sparkline",
-    label: "KPI Card with Sparkline",
+    id: "panos_kpi_card_advanced",
+    label: "ADR Advanced KPI Card",
     
     create: function(element, config) {
         element.innerHTML = `
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
                 #kpi-container {
                     font-family: 'Inter', sans-serif;
                     background: #ffffff;
@@ -29,20 +29,35 @@ looker.plugins.visualizations.add({
                 }
                 .kpi-header { display: flex; justify-content: space-between; align-items: center; color: #5f6368; font-size: 15px; font-weight: 600; margin-bottom: 8px; }
                 .kpi-icon { color: #1a73e8; font-size: 20px; }
-                .kpi-main-value { font-size: 38px; font-weight: 700; color: #202124; margin-bottom: 4px; }
-                .kpi-sub-value { font-size: 14px; font-weight: 600; margin-bottom: 20px; }
-                .positive { color: #137333; } /* Google green */
-                .negative { color: #c5221f; } /* Google red */
+                .kpi-main-value { font-size: 38px; font-weight: 700; color: #202124; margin-bottom: 8px; }
+                
+                .comparisons-wrapper { display: flex; flex-direction: column; gap: 4px; margin-bottom: 15px; }
+                .kpi-sub-value { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; color: #5f6368;}
+                .badge { padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+                
+                .positive-badge { background-color: #e6f4ea; color: #137333; }
+                .negative-badge { background-color: #fce8e6; color: #c5221f; }
+                .neutral-badge { background-color: #f1f3f4; color: #5f6368; }
+
                 .chart-container { flex-grow: 1; position: relative; width: 100%; min-height: 80px; }
-                .error-msg { color: #ea4335; font-size: 14px; text-align: center; padding: 20px;}
+                .error-msg { color: #ea4335; font-size: 14px; text-align: center; padding: 20px; background: #fce8e6; border-radius: 8px;}
             </style>
             <div id="kpi-container">
                 <div class="kpi-header">
-                    <span id="kpi-title">Metric Title</span>
-                    <span class="kpi-icon">📊</span>
+                    <span id="kpi-title">YTD ADR</span>
+                    <span class="kpi-icon">💶</span>
                 </div>
-                <div class="kpi-main-value" id="kpi-value">0</div>
-                <div class="kpi-sub-value" id="kpi-comparison">...</div>
+                <div class="kpi-main-value" id="kpi-value">€0.00</div>
+                
+                <div class="comparisons-wrapper">
+                    <div class="kpi-sub-value" id="yoy-comparison">
+                        <span class="badge" id="yoy-badge">0%</span> vs Last Year YTD
+                    </div>
+                    <div class="kpi-sub-value" id="mom-comparison">
+                        <span class="badge" id="mom-badge">0%</span> vs Last Month
+                    </div>
+                </div>
+
                 <div class="chart-container">
                     <canvas id="kpi-chart"></canvas>
                 </div>
@@ -52,60 +67,67 @@ looker.plugins.visualizations.add({
     },
 
     updateAsync: function(data, element, config, queryResponse, details, done) {
-        // Πιάνει τα πάντα, ακόμα και Table Calculations
         var dimensions = queryResponse.fields.dimension_like;
         var measures = queryResponse.fields.measure_like;
 
-        if (!dimensions || dimensions.length === 0 || !measures || measures.length === 0) {
-            element.querySelector("#kpi-container").innerHTML = `<div class="error-msg">Σφάλμα: Βάλε 1 Dimension και 1 Measure στον πίνακα.</div>`;
-            done();
-            return;
+        // Έλεγχος λαθών
+        if (dimensions.length === 0 || measures.length < 2) {
+            element.querySelector("#kpi-container").innerHTML = `<div class="error-msg"><b>Σφάλμα:</b> Βάλε 1 Dimension (Μήνα) και 2 Measures (Φετινό ADR, Περσινό ADR).</div>`;
+            done(); return;
+        }
+        if (!queryResponse.totals_data) {
+             element.querySelector("#kpi-container").innerHTML = `<div class="error-msg"><b>Σφάλμα:</b> Πρέπει να τσεκάρεις το κουτάκι <b>Totals</b> στον πίνακα δεδομένων στο Looker!</div>`;
+             done(); return;
         }
 
-        // Αν υπήρχε error πριν, το καθαρίζουμε
-        if (element.querySelector(".error-msg")) { this.create(element, config); }
+        // Ονόματα Στηλών
+        var dimMonth = dimensions[0].name;
+        var measureCurrent = measures[0].name; // Φετινό
+        var measurePast = measures[1].name;    // Περσινό
 
-        var dimensionName = dimensions[0].name;
-        var measureName = measures[0].name;
-        var measureLabel = measures[0].label_short || measures[0].label;
+        // --- ΥΠΟΛΟΓΙΣΜΟΣ ΣΥΝΟΛΟΥ ΧΡΟΝΙΑΣ (YTD) ---
+        // Διαβάζουμε το συνολικό νούμερο από τη γραμμή Totals του Looker
+        var currentYearTotal = queryResponse.totals_data[measureCurrent].value;
+        var pastYearTotal = queryResponse.totals_data[measurePast].value;
+        
+        // Μορφοποίηση κεντρικού αριθμού (Συνολικό Φετινό ADR)
+        element.querySelector("#kpi-value").innerHTML = queryResponse.totals_data[measureCurrent].rendered || ("€" + currentYearTotal.toFixed(2));
 
-        element.querySelector("#kpi-title").innerText = measureLabel;
+        // --- ΥΠΟΛΟΓΙΣΜΟΣ YTD vs LAST YEAR ---
+        var yoyBadge = element.querySelector("#yoy-badge");
+        if (pastYearTotal) {
+            var yoyDiff = currentYearTotal - pastYearTotal;
+            var yoyPct = ((yoyDiff / pastYearTotal) * 100).toFixed(1);
+            yoyBadge.innerHTML = (yoyDiff > 0 ? "+" : "") + yoyPct + "%";
+            yoyBadge.className = "badge " + (yoyDiff >= 0 ? "positive-badge" : "negative-badge");
+        } else {
+            yoyBadge.innerHTML = "N/A"; yoyBadge.className = "badge neutral-badge";
+        }
 
+        // --- ΥΠΟΛΟΓΙΣΜΟΣ ΜΗΝΑ vs ΠΡΟΗΓΟΥΜΕΝΟΥ ΜΗΝΑ ---
+        var currentValues = [];
         var labels = [];
-        var values = [];
-
+        
         data.forEach(function(row) {
-            var rawDim = row[dimensionName].rendered || row[dimensionName].value;
-            // Κρατάμε τα 3 πρώτα γράμματα του μήνα ή της χρονολογίας για καθαρότητα (π.χ. Jan, Feb)
-            var cleanDim = String(rawDim).replace(/(<([^>]+)>)/gi, "").substring(0, 7); 
-            labels.push(cleanDim); 
-            values.push(Number(row[measureName].value));
+            var rawDim = row[dimMonth].rendered || row[dimMonth].value;
+            labels.push(String(rawDim).replace(/(<([^>]+)>)/gi, "").substring(0, 3)); 
+            currentValues.push(Number(row[measureCurrent].value));
         });
 
-        if (values.length === 0) { done(); return; }
+        var currentMonthValue = currentValues[currentValues.length - 1];
+        var previousMonthValue = currentValues.length > 1 ? currentValues[currentValues.length - 2] : 0;
+        var momBadge = element.querySelector("#mom-badge");
 
-        var lastValue = values[values.length - 1];
-        var previousValue = values.length > 1 ? values[values.length - 2] : 0;
-        
-        // Βάζουμε την κύρια τιμή μαζί με το €
-        var finalRowInfo = data[data.length - 1][measureName];
-        element.querySelector("#kpi-value").innerHTML = finalRowInfo.rendered || finalRowInfo.value;
-
-        // Υπολογισμός ποσοστού %
-        var comparisonEl = element.querySelector("#kpi-comparison");
-        if (previousValue !== 0 && values.length > 1) {
-            var diff = lastValue - previousValue;
-            var pctChange = ((diff / Math.abs(previousValue)) * 100).toFixed(1);
-            if (diff >= 0) {
-                comparisonEl.innerHTML = `+${pctChange}% από τον προηγούμενο μήνα`;
-                comparisonEl.className = "kpi-sub-value positive";
-            } else {
-                comparisonEl.innerHTML = `${pctChange}% από τον προηγούμενο μήνα`;
-                comparisonEl.className = "kpi-sub-value negative";
-            }
+        if (previousMonthValue !== 0) {
+            var momDiff = currentMonthValue - previousMonthValue;
+            var momPct = ((momDiff / previousMonthValue) * 100).toFixed(1);
+            momBadge.innerHTML = (momDiff > 0 ? "+" : "") + momPct + "%";
+            momBadge.className = "badge " + (momDiff >= 0 ? "positive-badge" : "negative-badge");
+        } else {
+            momBadge.innerHTML = "N/A"; momBadge.className = "badge neutral-badge";
         }
 
-        // Γράφημα
+        // --- ΣΧΕΔΙΑΣΜΟΣ ΓΡΑΦΗΜΑΤΟΣ (Φετινή Καμπύλη) ---
         var drawChart = () => {
             var ctx = element.querySelector("#kpi-chart").getContext("2d");
             if (this._chartInstance) { this._chartInstance.destroy(); }
@@ -115,14 +137,14 @@ looker.plugins.visualizations.add({
                 data: {
                     labels: labels,
                     datasets: [{
-                        data: values,
+                        data: currentValues,
                         borderColor: '#1a73e8',
                         backgroundColor: 'rgba(26, 115, 232, 0.15)',
                         borderWidth: 2,
                         pointRadius: 0,
                         pointHoverRadius: 6,
                         fill: true,
-                        tension: 0.4 // Κάνει την καμπύλη ομαλή
+                        tension: 0.4
                     }]
                 },
                 options: {
@@ -130,10 +152,10 @@ looker.plugins.visualizations.add({
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false }, tooltip: { enabled: true } },
                     scales: {
-                        x: { display: true, grid: { display: false }, ticks: { font: {family: 'Inter'}, color: '#80868b' } },
-                        y: { display: false, min: Math.min(...values) * 0.90 } // Κρύβει τις τιμές Υ για design
+                        x: { display: true, grid: { display: false }, ticks: { font: {family: 'Inter', size: 11}, color: '#80868b' } },
+                        y: { display: false, min: Math.min(...currentValues) * 0.90 } 
                     },
-                    layout: { padding: 0 }
+                    layout: { padding: { top: 10 } }
                 }
             });
             done();
