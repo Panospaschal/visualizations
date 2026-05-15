@@ -14,7 +14,7 @@ looker.plugins.visualizations.add({
     max_nodes_per_level: {
       type: "number",
       label: "Max Nodes Per Level",
-      default: 20
+      default: 12
     }
   },
 
@@ -28,16 +28,17 @@ looker.plugins.visualizations.add({
           background: #030303;
           color: white;
           font-family: Inter, Arial, sans-serif;
-          padding: clamp(8px, 1.8vw, 28px);
+          padding: clamp(8px, 1.5vw, 24px);
           box-sizing: border-box;
-          position: relative;
           overflow: hidden;
+          position: relative;
         }
 
         .sk-title {
-          font-size: clamp(15px, 2.5vw, 30px);
+          height: 36px;
+          font-size: clamp(16px, 2.4vw, 30px);
           font-weight: 900;
-          margin-bottom: clamp(6px, 1.2vw, 16px);
+          margin: 0 0 8px 0;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -46,9 +47,15 @@ looker.plugins.visualizations.add({
         .sk-chart {
           width: 100%;
           height: calc(100% - 44px);
-          min-height: 160px;
-          position: relative;
+          min-height: 120px;
           overflow: hidden;
+          position: relative;
+        }
+
+        .sk-chart svg {
+          width: 100%;
+          height: 100%;
+          display: block;
         }
 
         .sk-tooltip {
@@ -65,40 +72,31 @@ looker.plugins.visualizations.add({
           opacity: 0;
           transform: translate(-50%, -120%);
           z-index: 20;
-          max-width: 280px;
-        }
-
-        .sk-empty {
-          padding: 20px;
-          color: white;
-          font-size: 12px;
+          max-width: 260px;
         }
 
         .sk-node-label {
           fill: rgba(255,255,255,0.92);
-          font-size: clamp(8px, 0.9vw, 11px);
-          font-weight: 700;
+          font-size: clamp(8px, 0.85vw, 11px);
+          font-weight: 800;
           pointer-events: none;
         }
 
         .sk-node-value {
           fill: rgba(255,255,255,0.55);
-          font-size: clamp(7px, 0.8vw, 10px);
+          font-size: clamp(7px, 0.75vw, 10px);
           pointer-events: none;
         }
 
-        .sk-hint {
-          position: absolute;
-          right: clamp(8px, 1.8vw, 28px);
-          top: clamp(8px, 1.8vw, 28px);
-          color: rgba(255,255,255,0.35);
-          font-size: clamp(8px, 0.9vw, 11px);
+        .sk-empty {
+          color: white;
+          font-size: 12px;
+          padding: 16px;
         }
       </style>
 
       <div class="sk-wrap">
         <div class="sk-title"></div>
-        <div class="sk-hint">Click node to isolate</div>
         <div class="sk-chart"></div>
         <div class="sk-tooltip"></div>
       </div>
@@ -118,9 +116,7 @@ looker.plugins.visualizations.add({
     if (!data || data.length === 0 || dimensions.length < 2 || measures.length < 1) {
       chartEl.innerHTML = `
         <div class="sk-empty">
-          Add at least 2 dimensions and 1 measure.<br><br>
-          Example:<br>
-          Book Source → Country → Rate Name
+          Add at least 2 dimensions and 1 measure.
         </div>
       `;
       done();
@@ -160,6 +156,10 @@ looker.plugins.visualizations.add({
 
       const d3 = window.d3;
 
+      const bounds = chartEl.getBoundingClientRect();
+      const width = Math.max(bounds.width, 320);
+      const height = Math.max(bounds.height, 160);
+
       const measureField = measures[0].name;
       const dimensionFields = dimensions.map(d => d.name);
 
@@ -174,7 +174,7 @@ looker.plugins.visualizations.add({
         "#4dd4ac"
       ];
 
-      const maxNodesPerLevel = Number(config.max_nodes_per_level || 20);
+      const maxNodesPerLevel = Number(config.max_nodes_per_level || 12);
       const valueFormat = config.value_format || "currency";
       const prefix = config.value_prefix || "€";
       const suffix = config.value_suffix || "";
@@ -211,14 +211,12 @@ looker.plugins.visualizations.add({
         if (!value || value <= 0) return;
 
         dimensionFields.forEach((field, level) => {
-          const raw = row[field]?.value || "Unknown";
-          const key = String(raw);
+          const key = String(row[field]?.value || "Unknown");
           levelValues[level][key] = (levelValues[level][key] || 0) + value;
         });
       });
 
       const allowedByLevel = {};
-
       Object.keys(levelValues).forEach(level => {
         allowedByLevel[level] = Object.entries(levelValues[level])
           .sort((a, b) => b[1] - a[1])
@@ -253,14 +251,8 @@ looker.plugins.visualizations.add({
         if (!value || value <= 0) return;
 
         const path = dimensionFields.map((field, level) => {
-          const raw = row[field]?.value || "Unknown";
-          const name = String(raw);
-
-          if (!allowedByLevel[level].includes(name)) {
-            return "Other";
-          }
-
-          return name;
+          const name = String(row[field]?.value || "Unknown");
+          return allowedByLevel[level].includes(name) ? name : "Other";
         });
 
         for (let i = 0; i < path.length - 1; i++) {
@@ -283,24 +275,26 @@ looker.plugins.visualizations.add({
       const nodes = Array.from(nodeMap.values());
       const links = Array.from(linksMap.values()).filter(l => l.value > 0);
 
-      if (nodes.length === 0 || links.length === 0) {
+      if (!nodes.length || !links.length) {
         chartEl.innerHTML = `<div class="sk-empty">No valid Sankey data found.</div>`;
         return;
       }
 
-      const bounds = chartEl.getBoundingClientRect();
-      const width = Math.max(bounds.width, 300);
-      const height = Math.max(bounds.height, 160);
+      const levelCount = dimensionFields.length;
 
-      const nodeWidth = Math.max(8, Math.min(18, width * 0.018));
-      const nodePadding = Math.max(6, Math.min(16, height * 0.025));
+      const leftMargin = width < 600 ? 6 : 12;
+      const rightMargin = width < 600 ? 6 : 12;
+      const topMargin = 6;
+      const bottomMargin = 6;
+
+      const nodeWidth = Math.max(7, Math.min(18, width * 0.014));
+      const nodePadding = Math.max(4, Math.min(14, height * 0.018));
 
       const svg = d3
         .select(chartEl)
         .append("svg")
-        .attr("width", width)
-        .attr("height", height)
-        .style("cursor", "default");
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("preserveAspectRatio", "xMidYMid meet");
 
       svg.on("click", function(event) {
         if (event.target.tagName === "svg") {
@@ -314,8 +308,8 @@ looker.plugins.visualizations.add({
         .nodeWidth(nodeWidth)
         .nodePadding(nodePadding)
         .extent([
-          [4, 4],
-          [width - 4, height - 4]
+          [leftMargin, topMargin],
+          [width - rightMargin, height - bottomMargin]
         ]);
 
       const graph = sankey({
@@ -351,7 +345,6 @@ looker.plugins.visualizations.add({
         .data(graph.links)
         .enter()
         .append("path")
-        .attr("class", "sk-link")
         .attr("d", d3.sankeyLinkHorizontal())
         .attr("stroke", (d, i) => "url(#sk-gradient-" + i + ")")
         .attr("stroke-width", d => Math.max(1, d.width))
@@ -360,9 +353,11 @@ looker.plugins.visualizations.add({
         .on("mousemove", function(event, d) {
           d3.select(this).attr("opacity", 1);
 
+          const point = d3.pointer(event, chartEl);
+
           tooltipEl.style.opacity = 1;
-          tooltipEl.style.left = event.offsetX + "px";
-          tooltipEl.style.top = event.offsetY + "px";
+          tooltipEl.style.left = point[0] + "px";
+          tooltipEl.style.top = point[1] + "px";
           tooltipEl.innerHTML = `
             <strong>${d.source.name}</strong> → <strong>${d.target.name}</strong><br>
             Value: ${formatValue(d.value)}
@@ -382,7 +377,6 @@ looker.plugins.visualizations.add({
         .data(graph.nodes)
         .enter()
         .append("g")
-        .attr("class", "sk-node")
         .style("cursor", "pointer")
         .on("click", function(event, d) {
           event.stopPropagation();
@@ -399,34 +393,78 @@ looker.plugins.visualizations.add({
         .attr("fill", d => d.color)
         .attr("opacity", 0.95)
         .on("mousemove", function(event, d) {
+          const point = d3.pointer(event, chartEl);
+
           tooltipEl.style.opacity = 1;
-          tooltipEl.style.left = event.offsetX + "px";
-          tooltipEl.style.top = event.offsetY + "px";
+          tooltipEl.style.left = point[0] + "px";
+          tooltipEl.style.top = point[1] + "px";
           tooltipEl.innerHTML = `
             <strong>${d.name}</strong><br>
-            Total: ${formatValue(d.value)}<br>
-            Level: ${d.level + 1}
+            Total: ${formatValue(d.value)}
           `;
         })
         .on("mouseleave", function() {
           tooltipEl.style.opacity = 0;
         });
 
+      const maxLabelChars =
+        width < 500 ? 9 :
+        width < 800 ? 14 :
+        width < 1100 ? 18 :
+        24;
+
+      function shorten(text) {
+        if (!text) return "";
+        return text.length > maxLabelChars
+          ? text.slice(0, maxLabelChars) + "…"
+          : text;
+      }
+
       node
         .append("text")
         .attr("class", "sk-node-label")
-        .attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("x", d => {
+          if (levelCount === 2) {
+            return d.level === 0 ? d.x1 + 5 : d.x0 - 5;
+          }
+
+          if (d.level === 0) return d.x1 + 5;
+          if (d.level === levelCount - 1) return d.x0 - 5;
+          return d.x1 + 5;
+        })
         .attr("y", d => (d.y0 + d.y1) / 2 - 3)
         .attr("dy", "0.35em")
-        .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
-        .text(d => d.name.length > 20 ? d.name.slice(0, 20) + "…" : d.name);
+        .attr("text-anchor", d => {
+          if (levelCount === 2) {
+            return d.level === 0 ? "start" : "end";
+          }
+
+          if (d.level === levelCount - 1) return "end";
+          return "start";
+        })
+        .text(d => shorten(d.name));
 
       node
         .append("text")
         .attr("class", "sk-node-value")
-        .attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("x", d => {
+          if (levelCount === 2) {
+            return d.level === 0 ? d.x1 + 5 : d.x0 - 5;
+          }
+
+          if (d.level === 0) return d.x1 + 5;
+          if (d.level === levelCount - 1) return d.x0 - 5;
+          return d.x1 + 5;
+        })
         .attr("y", d => (d.y0 + d.y1) / 2 + 11)
-        .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
+        .attr("text-anchor", d => {
+          if (levelCount === 2) {
+            return d.level === 0 ? "start" : "end";
+          }
+
+          if (d.level === levelCount - 1) return "end";
+          return "start";
+        })
         .text(d => formatValue(d.value));
 
       function getConnectedPathIds(selectedNode) {
@@ -476,13 +514,13 @@ looker.plugins.visualizations.add({
           .duration(200)
           .attr("opacity", d => {
             const id = d.source.id + "→" + d.target.id;
-            return connectedLinks.has(id) ? 1 : 0.06;
+            return connectedLinks.has(id) ? 1 : 0.05;
           })
           .attr("stroke-width", d => {
             const id = d.source.id + "→" + d.target.id;
             return connectedLinks.has(id)
               ? Math.max(2, d.width)
-              : Math.max(1, d.width * 0.35);
+              : Math.max(1, d.width * 0.3);
           });
 
         node
@@ -504,7 +542,7 @@ looker.plugins.visualizations.add({
           .duration(200)
           .attr("opacity", d => {
             const id = d.source.id + "→" + d.target.id;
-            return id === selectedLinkId ? 1 : 0.06;
+            return id === selectedLinkId ? 1 : 0.05;
           });
 
         node
