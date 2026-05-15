@@ -1,219 +1,349 @@
 looker.plugins.visualizations.add({
   id: "data_profiler",
-  label: "Hotel Performance Table",
+  label: "Data Profiler",
+
+  options: {
+    title: {
+      type: "string",
+      label: "Title",
+      default: "Data Profiler"
+    },
+
+    currency: {
+      type: "string",
+      label: "Currency Symbol",
+      default: "€"
+    },
+
+    value_format: {
+      type: "string",
+      label: "Format: currency / percent / number",
+      default: "currency"
+    }
+  },
 
   create: function(element) {
+
     element.innerHTML = `
       <style>
-        .rt-table-wrapper {
-          font-family: Inter, Arial, sans-serif;
+
+        .dp-wrap {
           width: 100%;
-          overflow-x: auto;
+          height: 100%;
+          min-height: 300px;
+          background: #030303;
+          color: white;
+          font-family: Inter, Arial, sans-serif;
+          padding: 24px;
+          box-sizing: border-box;
+          overflow: auto;
         }
 
-        .rt-table {
+        .dp-title {
+          font-size: clamp(18px, 3vw, 30px);
+          font-weight: 900;
+          margin-bottom: 20px;
+        }
+
+        .dp-table {
           width: 100%;
           border-collapse: collapse;
         }
 
-        .rt-table th {
+        .dp-table thead th {
           text-align: left;
-          padding: 14px;
-          background: #f7f7f7;
-          border-bottom: 2px solid #ddd;
-          font-size: 13px;
-          font-weight: 700;
-          color: #111;
+          padding: 12px;
+          font-size: 12px;
+          color: rgba(255,255,255,0.65);
+          border-bottom: 1px solid rgba(255,255,255,0.15);
+          position: sticky;
+          top: 0;
+          background: #030303;
+          z-index: 2;
         }
 
-        .rt-table td {
-          padding: 14px;
-          border-bottom: 1px solid #eee;
-          font-size: 13px;
-          color: #222;
+        .dp-table tbody tr {
+          transition: 0.2s ease;
+          cursor: pointer;
+        }
+
+        .dp-table tbody tr:hover {
+          background: rgba(255,255,255,0.06);
+        }
+
+        .dp-table tbody tr.active {
+          background: rgba(255,255,255,0.09);
+        }
+
+        .dp-table tbody tr.muted {
+          opacity: 0.2;
+        }
+
+        .dp-table td {
+          padding: 14px 12px;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
           vertical-align: middle;
         }
 
-        .rt-month {
-          font-weight: 700;
+        .dp-dimension {
+          font-size: 12px;
+          font-weight: 800;
+          color: rgba(255,255,255,0.92);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 220px;
         }
 
-        .rt-value {
-          font-weight: 600;
+        .dp-value {
+          font-size: 14px;
+          font-weight: 900;
           margin-bottom: 6px;
         }
 
-        .rt-bar-container {
+        .dp-bar-bg {
           width: 100%;
-          height: 9px;
-          background: #eeeeee;
-          border-radius: 20px;
+          height: 8px;
+          background: rgba(255,255,255,0.1);
+          border-radius: 999px;
           overflow: hidden;
         }
 
-        .rt-bar {
+        .dp-bar {
           height: 100%;
-          border-radius: 20px;
+          border-radius: 999px;
+          transition: width 0.35s ease;
         }
 
-        .rt-blue {
-          background: #007aff;
+        .blue {
+          background: #36a9d6;
         }
 
-        .rt-green {
-          background: #34c759;
+        .orange {
+          background: #ff9f2f;
         }
 
-        .rt-orange {
-          background: #ff9500;
+        .pink {
+          background: #e95fb8;
         }
 
-        .rt-empty {
+        .green {
+          background: #74d17c;
+        }
+
+        .red {
+          background: #ef3d2f;
+        }
+
+        .purple {
+          background: #b994ff;
+        }
+
+        .dp-empty {
           padding: 24px;
-          font-family: Inter, Arial, sans-serif;
-          color: #555;
+          color: white;
         }
+
       </style>
 
-      <div class="rt-table-wrapper">
-        <div id="rt-table"></div>
+      <div class="dp-wrap">
+
+        <div class="dp-title"></div>
+
+        <div class="dp-content"></div>
+
       </div>
     `;
   },
 
-  updateAsync: function(data, element, config, queryResponse, details, done) {
-    const container = element.querySelector("#rt-table");
+  updateAsync: function(
+    data,
+    element,
+    config,
+    queryResponse,
+    details,
+    done
+  ) {
 
-    if (!data || data.length === 0) {
-      container.innerHTML = `<div class="rt-empty">No data available</div>`;
-      done();
-      return;
-    }
+    const titleEl =
+      element.querySelector(".dp-title");
 
-    const dimensions = queryResponse.fields.dimension_like || [];
-    const measures = queryResponse.fields.measure_like || [];
+    const contentEl =
+      element.querySelector(".dp-content");
 
-    if (dimensions.length < 1 || measures.length < 4) {
-      container.innerHTML = `
-        <div class="rt-empty">
-          This visualization needs 1 dimension and 4 measures:<br>
-          Bookmonth, ADR, Occupancy, Revenue, Nights Sold
+    titleEl.innerText =
+      config.title || "Data Profiler";
+
+    const dimensions =
+      queryResponse.fields.dimension_like || [];
+
+    const measures =
+      queryResponse.fields.measure_like || [];
+
+    if (
+      !data ||
+      data.length === 0 ||
+      dimensions.length < 1 ||
+      measures.length < 1
+    ) {
+
+      contentEl.innerHTML = `
+        <div class="dp-empty">
+          Add:
+          <br><br>
+          • At least 1 Dimension
+          <br>
+          • At least 1 Measure
         </div>
       `;
+
       done();
       return;
     }
 
-    const monthField = dimensions[0].name;
-    const adrField = measures[0].name;
-    const occField = measures[1].name;
-    const revenueField = measures[2].name;
-    const nightsField = measures[3].name;
+    const dimensionField =
+      dimensions[0].name;
 
-    const getValue = function(row, field) {
-      return row && row[field] ? row[field].value : null;
-    };
+    const colors = [
+      "blue",
+      "orange",
+      "pink",
+      "green",
+      "red",
+      "purple"
+    ];
 
-    const formatCurrency = function(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      return "€" + Number(value).toLocaleString(undefined, {
-        maximumFractionDigits: 0
-      });
-    };
+    function formatValue(value) {
 
-    const formatNumber = function(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      return Number(value).toLocaleString(undefined, {
-        maximumFractionDigits: 0
-      });
-    };
+      const format =
+        config.value_format || "currency";
 
-    const formatPercent = function(value) {
-      if (value === null || value === undefined || value === "") return "-";
+      const currency =
+        config.currency || "€";
 
-      let pct = Number(value);
+      const num =
+        Number(value || 0);
 
-      if (pct <= 1) {
-        pct = pct * 100;
+      if (format === "percent") {
+
+        if (Math.abs(num) <= 1) {
+          return (num * 100).toFixed(1) + "%";
+        }
+
+        return num.toFixed(1) + "%";
       }
 
-      return pct.toFixed(1) + "%";
-    };
+      if (format === "number") {
 
-    const adrValues = data
-      .map(row => Number(getValue(row, adrField)))
-      .filter(v => !isNaN(v));
+        return num.toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
+      }
 
-    const revenueValues = data
-      .map(row => Number(getValue(row, revenueField)))
-      .filter(v => !isNaN(v));
+      if (Math.abs(num) >= 1000000) {
+        return currency +
+          (num / 1000000).toFixed(1) +
+          "M";
+      }
 
-    const maxAdr = Math.max(...adrValues, 1);
-    const maxRevenue = Math.max(...revenueValues, 1);
+      if (Math.abs(num) >= 1000) {
+        return currency +
+          (num / 1000).toFixed(0) +
+          "K";
+      }
+
+      return currency +
+        num.toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
+    }
+
+    const maxValues = {};
+
+    measures.forEach(measure => {
+
+      maxValues[measure.name] =
+        Math.max(
+          ...data.map(row =>
+            Number(
+              row[measure.name]?.value || 0
+            )
+          ),
+          1
+        );
+    });
 
     let html = `
-      <table class="rt-table">
+      <table class="dp-table">
+
         <thead>
           <tr>
-            <th>Month</th>
-            <th>ADR</th>
-            <th>Occupancy</th>
-            <th>Revenue</th>
-            <th>Nights Sold</th>
+
+            <th>
+              ${dimensions[0].label_short || dimensions[0].label}
+            </th>
+
+            ${measures.map(measure => `
+              <th>
+                ${measure.label_short || measure.label}
+              </th>
+            `).join("")}
+
           </tr>
         </thead>
+
         <tbody>
     `;
 
-    data.forEach(row => {
-      const month = getValue(row, monthField);
-      const adr = Number(getValue(row, adrField));
-      const occRaw = Number(getValue(row, occField));
-      const revenue = Number(getValue(row, revenueField));
-      const nights = Number(getValue(row, nightsField));
+    data.forEach((row, rowIndex) => {
 
-      let occPct = occRaw;
-
-      if (occPct <= 1) {
-        occPct = occPct * 100;
-      }
-
-      const adrWidth = isNaN(adr) ? 0 : Math.min((adr / maxAdr) * 100, 100);
-      const occWidth = isNaN(occPct) ? 0 : Math.min(occPct, 100);
-      const revenueWidth = isNaN(revenue) ? 0 : Math.min((revenue / maxRevenue) * 100, 100);
+      const dimValue =
+        row[dimensionField]?.value || "-";
 
       html += `
-        <tr>
-          <td class="rt-month">
-            ${month || "-"}
-          </td>
+        <tr class="dp-row">
 
           <td>
-            <div class="rt-value">${formatCurrency(adr)}</div>
-            <div class="rt-bar-container">
-              <div class="rt-bar rt-blue" style="width:${adrWidth}%"></div>
+            <div class="dp-dimension">
+              ${dimValue}
             </div>
           </td>
-
-          <td>
-            <div class="rt-value">${formatPercent(occRaw)}</div>
-            <div class="rt-bar-container">
-              <div class="rt-bar rt-green" style="width:${occWidth}%"></div>
-            </div>
-          </td>
-
-          <td>
-            <div class="rt-value">${formatCurrency(revenue)}</div>
-            <div class="rt-bar-container">
-              <div class="rt-bar rt-orange" style="width:${revenueWidth}%"></div>
-            </div>
-          </td>
-
-          <td>
-            <div class="rt-value">${formatNumber(nights)}</div>
-          </td>
-        </tr>
       `;
+
+      measures.forEach((measure, index) => {
+
+        const value =
+          Number(
+            row[measure.name]?.value || 0
+          );
+
+        const percentage =
+          (
+            value /
+            maxValues[measure.name]
+          ) * 100;
+
+        html += `
+          <td>
+
+            <div class="dp-value">
+              ${formatValue(value)}
+            </div>
+
+            <div class="dp-bar-bg">
+
+              <div
+                class="dp-bar ${colors[index % colors.length]}"
+                style="width:${percentage}%">
+              </div>
+
+            </div>
+
+          </td>
+        `;
+      });
+
+      html += `</tr>`;
     });
 
     html += `
@@ -221,7 +351,34 @@ looker.plugins.visualizations.add({
       </table>
     `;
 
-    container.innerHTML = html;
+    contentEl.innerHTML = html;
+
+    const rows =
+      contentEl.querySelectorAll(".dp-row");
+
+    rows.forEach(row => {
+
+      row.addEventListener("click", () => {
+
+        const isActive =
+          row.classList.contains("active");
+
+        rows.forEach(r => {
+          r.classList.remove("active");
+          r.classList.remove("muted");
+        });
+
+        if (!isActive) {
+
+          rows.forEach(r => {
+            r.classList.add("muted");
+          });
+
+          row.classList.remove("muted");
+          row.classList.add("active");
+        }
+      });
+    });
 
     done();
   }
