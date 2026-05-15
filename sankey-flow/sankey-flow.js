@@ -8,10 +8,20 @@ looker.plugins.visualizations.add({
       label: "Title",
       default: "Revenue Flow"
     },
+    value_format: {
+      type: "string",
+      label: "Value Format: auto / currency / percent / number",
+      default: "currency"
+    },
     value_prefix: {
       type: "string",
       label: "Value Prefix",
       default: "€"
+    },
+    value_suffix: {
+      type: "string",
+      label: "Value Suffix",
+      default: ""
     },
     max_nodes_per_level: {
       type: "number",
@@ -61,7 +71,7 @@ looker.plugins.visualizations.add({
           opacity: 0;
           transform: translate(-50%, -120%);
           z-index: 20;
-          max-width: 260px;
+          max-width: 280px;
         }
 
         .sk-empty {
@@ -73,16 +83,27 @@ looker.plugins.visualizations.add({
           fill: rgba(255,255,255,0.92);
           font-size: 11px;
           font-weight: 700;
+          pointer-events: none;
         }
 
         .sk-node-value {
           fill: rgba(255,255,255,0.55);
           font-size: 10px;
+          pointer-events: none;
+        }
+
+        .sk-hint {
+          position: absolute;
+          right: 42px;
+          top: 42px;
+          color: rgba(255,255,255,0.45);
+          font-size: 11px;
         }
       </style>
 
       <div class="sk-wrap">
         <div class="sk-title"></div>
+        <div class="sk-hint">Click a node to isolate path</div>
         <div class="sk-chart"></div>
         <div class="sk-tooltip"></div>
       </div>
@@ -104,8 +125,8 @@ looker.plugins.visualizations.add({
         <div class="sk-empty">
           Add at least 2 dimensions and 1 measure.<br><br>
           Example:<br>
-          Source → Country → Room Type<br>
-          Measure: Revenue
+          Book Source → Country → Rate Name<br>
+          Measure: Revenue / % of Total / Nights / Bookings
         </div>
       `;
       done();
@@ -135,12 +156,8 @@ looker.plugins.visualizations.add({
         renderSankey();
         done();
       })
-      .catch(error => {
-        chartEl.innerHTML = `
-          <div class="sk-empty">
-            Could not load Sankey libraries.
-          </div>
-        `;
+      .catch(() => {
+        chartEl.innerHTML = `<div class="sk-empty">Could not load Sankey libraries.</div>`;
         done();
       });
 
@@ -163,21 +180,44 @@ looker.plugins.visualizations.add({
         "#4dd4ac"
       ];
 
-      const prefix = config.value_prefix || "€";
       const maxNodesPerLevel = Number(config.max_nodes_per_level || 20);
+      const valueFormat = config.value_format || "currency";
+      const prefix = config.value_prefix || "€";
+      const suffix = config.value_suffix || "";
 
       const formatValue = value => {
-        if (Math.abs(value) >= 1000000) {
-          return prefix + (value / 1000000).toFixed(1) + "M";
+        const v = Number(value || 0);
+
+        if (valueFormat === "percent") {
+          if (Math.abs(v) <= 1) {
+            return (v * 100).toFixed(1) + "%";
+          }
+          return v.toFixed(1) + "%";
         }
 
-        if (Math.abs(value) >= 1000) {
-          return prefix + (value / 1000).toFixed(0) + "K";
+        if (valueFormat === "number") {
+          return v.toLocaleString(undefined, {
+            maximumFractionDigits: 0
+          });
         }
 
-        return prefix + Number(value).toLocaleString(undefined, {
+        if (valueFormat === "auto") {
+          return v.toLocaleString(undefined, {
+            maximumFractionDigits: 2
+          }) + suffix;
+        }
+
+        if (Math.abs(v) >= 1000000) {
+          return prefix + (v / 1000000).toFixed(1) + "M" + suffix;
+        }
+
+        if (Math.abs(v) >= 1000) {
+          return prefix + (v / 1000).toFixed(0) + "K" + suffix;
+        }
+
+        return prefix + v.toLocaleString(undefined, {
           maximumFractionDigits: 0
-        });
+        }) + suffix;
       };
 
       const levelValues = {};
@@ -221,9 +261,9 @@ looker.plugins.visualizations.add({
 
         if (!nodeMap.has(id)) {
           nodeMap.set(id, {
-            id: id,
-            name: name,
-            level: level,
+            id,
+            name,
+            level,
             color: colors[level % colors.length]
           });
         }
@@ -250,7 +290,6 @@ looker.plugins.visualizations.add({
         for (let i = 0; i < path.length - 1; i++) {
           const sourceId = addNode(i, path[i]);
           const targetId = addNode(i + 1, path[i + 1]);
-
           const linkKey = sourceId + "→" + targetId;
 
           if (!linksMap.has(linkKey)) {
@@ -272,11 +311,7 @@ looker.plugins.visualizations.add({
       const links = Array.from(linksMap.values()).filter(l => l.value > 0);
 
       if (nodes.length === 0 || links.length === 0) {
-        chartEl.innerHTML = `
-          <div class="sk-empty">
-            No valid Sankey data found.
-          </div>
-        `;
+        chartEl.innerHTML = `<div class="sk-empty">No valid Sankey data found.</div>`;
         return;
       }
 
@@ -287,7 +322,14 @@ looker.plugins.visualizations.add({
         .select(chartEl)
         .append("svg")
         .attr("width", width)
-        .attr("height", height);
+        .attr("height", height)
+        .style("cursor", "default");
+
+      svg.on("click", function(event) {
+        if (event.target.tagName === "svg") {
+          resetHighlight();
+        }
+      });
 
       const sankey = d3
         .sankey()
@@ -318,26 +360,28 @@ looker.plugins.visualizations.add({
           .append("stop")
           .attr("offset", "0%")
           .attr("stop-color", link.source.color)
-          .attr("stop-opacity", 0.45);
+          .attr("stop-opacity", 0.5);
 
         gradient
           .append("stop")
           .attr("offset", "100%")
           .attr("stop-color", link.target.color)
-          .attr("stop-opacity", 0.45);
+          .attr("stop-opacity", 0.5);
       });
 
-      svg
+      const linkSelection = svg
         .append("g")
         .attr("fill", "none")
         .selectAll("path")
         .data(graph.links)
         .enter()
         .append("path")
+        .attr("class", "sk-link")
         .attr("d", d3.sankeyLinkHorizontal())
         .attr("stroke", (d, i) => "url(#sk-gradient-" + i + ")")
         .attr("stroke-width", d => Math.max(1, d.width))
         .attr("opacity", 0.82)
+        .style("cursor", "pointer")
         .on("mousemove", function(event, d) {
           d3.select(this).attr("opacity", 1);
 
@@ -350,8 +394,11 @@ looker.plugins.visualizations.add({
           `;
         })
         .on("mouseleave", function() {
-          d3.select(this).attr("opacity", 0.82);
           tooltipEl.style.opacity = 0;
+        })
+        .on("click", function(event, d) {
+          event.stopPropagation();
+          highlightLink(d);
         });
 
       const node = svg
@@ -359,7 +406,13 @@ looker.plugins.visualizations.add({
         .selectAll("g")
         .data(graph.nodes)
         .enter()
-        .append("g");
+        .append("g")
+        .attr("class", "sk-node")
+        .style("cursor", "pointer")
+        .on("click", function(event, d) {
+          event.stopPropagation();
+          highlightNodePath(d);
+        });
 
       node
         .append("rect")
@@ -376,7 +429,8 @@ looker.plugins.visualizations.add({
           tooltipEl.style.top = event.offsetY + "px";
           tooltipEl.innerHTML = `
             <strong>${d.name}</strong><br>
-            Total: ${formatValue(d.value)}
+            Total: ${formatValue(d.value)}<br>
+            Level: ${d.level + 1}
           `;
         })
         .on("mouseleave", function() {
@@ -399,6 +453,105 @@ looker.plugins.visualizations.add({
         .attr("y", d => (d.y0 + d.y1) / 2 + 12)
         .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
         .text(d => formatValue(d.value));
+
+      function getConnectedPathIds(selectedNode) {
+        const connectedNodes = new Set();
+        const connectedLinks = new Set();
+
+        connectedNodes.add(selectedNode.id);
+
+        let changed = true;
+
+        while (changed) {
+          changed = false;
+
+          graph.links.forEach(link => {
+            const sourceId = link.source.id;
+            const targetId = link.target.id;
+
+            if (connectedNodes.has(sourceId) || connectedNodes.has(targetId)) {
+              const linkId = sourceId + "→" + targetId;
+
+              if (!connectedLinks.has(linkId)) {
+                connectedLinks.add(linkId);
+                changed = true;
+              }
+
+              if (!connectedNodes.has(sourceId)) {
+                connectedNodes.add(sourceId);
+                changed = true;
+              }
+
+              if (!connectedNodes.has(targetId)) {
+                connectedNodes.add(targetId);
+                changed = true;
+              }
+            }
+          });
+        }
+
+        return { connectedNodes, connectedLinks };
+      }
+
+      function highlightNodePath(selectedNode) {
+        const { connectedNodes, connectedLinks } =
+          getConnectedPathIds(selectedNode);
+
+        linkSelection
+          .transition()
+          .duration(200)
+          .attr("opacity", d => {
+            const id = d.source.id + "→" + d.target.id;
+            return connectedLinks.has(id) ? 1 : 0.08;
+          })
+          .attr("stroke-width", d => {
+            const id = d.source.id + "→" + d.target.id;
+            return connectedLinks.has(id)
+              ? Math.max(2, d.width)
+              : Math.max(1, d.width * 0.4);
+          });
+
+        node
+          .transition()
+          .duration(200)
+          .attr("opacity", d => connectedNodes.has(d.id) ? 1 : 0.15);
+      }
+
+      function highlightLink(selectedLink) {
+        const selectedLinkId =
+          selectedLink.source.id + "→" + selectedLink.target.id;
+
+        const visibleNodes = new Set([
+          selectedLink.source.id,
+          selectedLink.target.id
+        ]);
+
+        linkSelection
+          .transition()
+          .duration(200)
+          .attr("opacity", d => {
+            const id = d.source.id + "→" + d.target.id;
+            return id === selectedLinkId ? 1 : 0.08;
+          });
+
+        node
+          .transition()
+          .duration(200)
+          .attr("opacity", d => visibleNodes.has(d.id) ? 1 : 0.15);
+      }
+
+      function resetHighlight() {
+        linkSelection
+          .transition()
+          .duration(200)
+          .attr("opacity", 0.82)
+          .attr("stroke-width", d => Math.max(1, d.width));
+
+        node
+          .transition()
+          .duration(200)
+          .attr("opacity", 1);
+      }
     }
   }
 });
