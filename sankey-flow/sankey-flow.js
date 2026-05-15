@@ -3,26 +3,14 @@ looker.plugins.visualizations.add({
   label: "Sankey Flow",
 
   options: {
-    title: {
-      type: "string",
-      label: "Title",
-      default: "Revenue Flow"
-    },
+    title: { type: "string", label: "Title", default: "Revenue Flow" },
     value_format: {
       type: "string",
       label: "Value Format: auto / currency / percent / number",
       default: "currency"
     },
-    value_prefix: {
-      type: "string",
-      label: "Value Prefix",
-      default: "€"
-    },
-    value_suffix: {
-      type: "string",
-      label: "Value Suffix",
-      default: ""
-    },
+    value_prefix: { type: "string", label: "Value Prefix", default: "€" },
+    value_suffix: { type: "string", label: "Value Suffix", default: "" },
     max_nodes_per_level: {
       type: "number",
       label: "Max Nodes Per Level",
@@ -35,26 +23,32 @@ looker.plugins.visualizations.add({
       <style>
         .sk-wrap {
           width: 100%;
-          min-height: 680px;
+          height: 100%;
+          min-height: 0;
           background: #030303;
           color: white;
           font-family: Inter, Arial, sans-serif;
-          padding: 34px 42px;
+          padding: clamp(8px, 1.8vw, 28px);
           box-sizing: border-box;
           position: relative;
           overflow: hidden;
         }
 
         .sk-title {
-          font-size: 30px;
+          font-size: clamp(15px, 2.5vw, 30px);
           font-weight: 900;
-          margin-bottom: 18px;
+          margin-bottom: clamp(6px, 1.2vw, 16px);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .sk-chart {
           width: 100%;
-          height: 570px;
+          height: calc(100% - 44px);
+          min-height: 160px;
           position: relative;
+          overflow: hidden;
         }
 
         .sk-tooltip {
@@ -75,35 +69,36 @@ looker.plugins.visualizations.add({
         }
 
         .sk-empty {
-          padding: 30px;
+          padding: 20px;
           color: white;
+          font-size: 12px;
         }
 
         .sk-node-label {
           fill: rgba(255,255,255,0.92);
-          font-size: 11px;
+          font-size: clamp(8px, 0.9vw, 11px);
           font-weight: 700;
           pointer-events: none;
         }
 
         .sk-node-value {
           fill: rgba(255,255,255,0.55);
-          font-size: 10px;
+          font-size: clamp(7px, 0.8vw, 10px);
           pointer-events: none;
         }
 
         .sk-hint {
           position: absolute;
-          right: 42px;
-          top: 42px;
-          color: rgba(255,255,255,0.45);
-          font-size: 11px;
+          right: clamp(8px, 1.8vw, 28px);
+          top: clamp(8px, 1.8vw, 28px);
+          color: rgba(255,255,255,0.35);
+          font-size: clamp(8px, 0.9vw, 11px);
         }
       </style>
 
       <div class="sk-wrap">
         <div class="sk-title"></div>
-        <div class="sk-hint">Click a node to isolate path</div>
+        <div class="sk-hint">Click node to isolate</div>
         <div class="sk-chart"></div>
         <div class="sk-tooltip"></div>
       </div>
@@ -125,8 +120,7 @@ looker.plugins.visualizations.add({
         <div class="sk-empty">
           Add at least 2 dimensions and 1 measure.<br><br>
           Example:<br>
-          Book Source → Country → Rate Name<br>
-          Measure: Revenue / % of Total / Nights / Bookings
+          Book Source → Country → Rate Name
         </div>
       `;
       done();
@@ -185,58 +179,41 @@ looker.plugins.visualizations.add({
       const prefix = config.value_prefix || "€";
       const suffix = config.value_suffix || "";
 
-      const formatValue = value => {
+      function formatValue(value) {
         const v = Number(value || 0);
 
         if (valueFormat === "percent") {
-          if (Math.abs(v) <= 1) {
-            return (v * 100).toFixed(1) + "%";
-          }
+          if (Math.abs(v) <= 1) return (v * 100).toFixed(1) + "%";
           return v.toFixed(1) + "%";
         }
 
         if (valueFormat === "number") {
-          return v.toLocaleString(undefined, {
-            maximumFractionDigits: 0
-          });
+          return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
         }
 
         if (valueFormat === "auto") {
-          return v.toLocaleString(undefined, {
-            maximumFractionDigits: 2
-          }) + suffix;
+          return v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + suffix;
         }
 
-        if (Math.abs(v) >= 1000000) {
-          return prefix + (v / 1000000).toFixed(1) + "M" + suffix;
-        }
+        if (Math.abs(v) >= 1000000) return prefix + (v / 1000000).toFixed(1) + "M" + suffix;
+        if (Math.abs(v) >= 1000) return prefix + (v / 1000).toFixed(0) + "K" + suffix;
 
-        if (Math.abs(v) >= 1000) {
-          return prefix + (v / 1000).toFixed(0) + "K" + suffix;
-        }
-
-        return prefix + v.toLocaleString(undefined, {
-          maximumFractionDigits: 0
-        }) + suffix;
-      };
+        return prefix + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) + suffix;
+      }
 
       const levelValues = {};
-
       dimensionFields.forEach((field, level) => {
         levelValues[level] = {};
       });
 
       data.forEach(row => {
         const value = Number(row[measureField]?.value || 0);
-
         if (!value || value <= 0) return;
 
         dimensionFields.forEach((field, level) => {
           const raw = row[field]?.value || "Unknown";
           const key = String(raw);
-
-          levelValues[level][key] =
-            (levelValues[level][key] || 0) + value;
+          levelValues[level][key] = (levelValues[level][key] || 0) + value;
         });
       });
 
@@ -273,7 +250,6 @@ looker.plugins.visualizations.add({
 
       data.forEach(row => {
         const value = Number(row[measureField]?.value || 0);
-
         if (!value || value <= 0) return;
 
         const path = dimensionFields.map((field, level) => {
@@ -296,10 +272,7 @@ looker.plugins.visualizations.add({
             linksMap.set(linkKey, {
               source: sourceId,
               target: targetId,
-              value: 0,
-              sourceName: path[i],
-              targetName: path[i + 1],
-              sourceLevel: i
+              value: 0
             });
           }
 
@@ -315,8 +288,12 @@ looker.plugins.visualizations.add({
         return;
       }
 
-      const width = chartEl.clientWidth || 1000;
-      const height = chartEl.clientHeight || 570;
+      const bounds = chartEl.getBoundingClientRect();
+      const width = Math.max(bounds.width, 300);
+      const height = Math.max(bounds.height, 160);
+
+      const nodeWidth = Math.max(8, Math.min(18, width * 0.018));
+      const nodePadding = Math.max(6, Math.min(16, height * 0.025));
 
       const svg = d3
         .select(chartEl)
@@ -334,11 +311,11 @@ looker.plugins.visualizations.add({
       const sankey = d3
         .sankey()
         .nodeId(d => d.id)
-        .nodeWidth(18)
-        .nodePadding(16)
+        .nodeWidth(nodeWidth)
+        .nodePadding(nodePadding)
         .extent([
-          [10, 10],
-          [width - 10, height - 10]
+          [4, 4],
+          [width - 4, height - 4]
         ]);
 
       const graph = sankey({
@@ -356,14 +333,12 @@ looker.plugins.visualizations.add({
           .attr("x1", link.source.x1)
           .attr("x2", link.target.x0);
 
-        gradient
-          .append("stop")
+        gradient.append("stop")
           .attr("offset", "0%")
           .attr("stop-color", link.source.color)
           .attr("stop-opacity", 0.5);
 
-        gradient
-          .append("stop")
+        gradient.append("stop")
           .attr("offset", "100%")
           .attr("stop-color", link.target.color)
           .attr("stop-opacity", 0.5);
@@ -440,17 +415,17 @@ looker.plugins.visualizations.add({
       node
         .append("text")
         .attr("class", "sk-node-label")
-        .attr("x", d => d.x0 < width / 2 ? d.x1 + 8 : d.x0 - 8)
+        .attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
         .attr("y", d => (d.y0 + d.y1) / 2 - 3)
         .attr("dy", "0.35em")
         .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
-        .text(d => d.name.length > 24 ? d.name.slice(0, 24) + "…" : d.name);
+        .text(d => d.name.length > 20 ? d.name.slice(0, 20) + "…" : d.name);
 
       node
         .append("text")
         .attr("class", "sk-node-value")
-        .attr("x", d => d.x0 < width / 2 ? d.x1 + 8 : d.x0 - 8)
-        .attr("y", d => (d.y0 + d.y1) / 2 + 12)
+        .attr("x", d => d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6)
+        .attr("y", d => (d.y0 + d.y1) / 2 + 11)
         .attr("text-anchor", d => d.x0 < width / 2 ? "start" : "end")
         .text(d => formatValue(d.value));
 
@@ -494,32 +469,30 @@ looker.plugins.visualizations.add({
       }
 
       function highlightNodePath(selectedNode) {
-        const { connectedNodes, connectedLinks } =
-          getConnectedPathIds(selectedNode);
+        const { connectedNodes, connectedLinks } = getConnectedPathIds(selectedNode);
 
         linkSelection
           .transition()
           .duration(200)
           .attr("opacity", d => {
             const id = d.source.id + "→" + d.target.id;
-            return connectedLinks.has(id) ? 1 : 0.08;
+            return connectedLinks.has(id) ? 1 : 0.06;
           })
           .attr("stroke-width", d => {
             const id = d.source.id + "→" + d.target.id;
             return connectedLinks.has(id)
               ? Math.max(2, d.width)
-              : Math.max(1, d.width * 0.4);
+              : Math.max(1, d.width * 0.35);
           });
 
         node
           .transition()
           .duration(200)
-          .attr("opacity", d => connectedNodes.has(d.id) ? 1 : 0.15);
+          .attr("opacity", d => connectedNodes.has(d.id) ? 1 : 0.12);
       }
 
       function highlightLink(selectedLink) {
-        const selectedLinkId =
-          selectedLink.source.id + "→" + selectedLink.target.id;
+        const selectedLinkId = selectedLink.source.id + "→" + selectedLink.target.id;
 
         const visibleNodes = new Set([
           selectedLink.source.id,
@@ -531,13 +504,13 @@ looker.plugins.visualizations.add({
           .duration(200)
           .attr("opacity", d => {
             const id = d.source.id + "→" + d.target.id;
-            return id === selectedLinkId ? 1 : 0.08;
+            return id === selectedLinkId ? 1 : 0.06;
           });
 
         node
           .transition()
           .duration(200)
-          .attr("opacity", d => visibleNodes.has(d.id) ? 1 : 0.15);
+          .attr("opacity", d => visibleNodes.has(d.id) ? 1 : 0.12);
       }
 
       function resetHighlight() {
