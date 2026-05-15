@@ -3,466 +3,86 @@ looker.plugins.visualizations.add({
   label: "Lollipop Comparison",
 
   options: {
-    title: {
-      type: "string",
-      label: "Title",
-      default: "Revenue Comparison"
-    },
-
-    current_label: {
-      type: "string",
-      label: "Current Label",
-      default: "Current"
-    },
-
-    comparison_label: {
-      type: "string",
-      label: "Comparison Label",
-      default: "Comparison"
-    },
-
-    value_prefix: {
-      type: "string",
-      label: "Value Prefix",
-      default: "€"
-    },
-
-    sort_by: {
-      type: "string",
-      label: "Sort By",
-      default: "data_order"
-    }
+    title: { type: "string", label: "Title", default: "Revenue Comparison" },
+    current_label: { type: "string", label: "Current Label", default: "Current" },
+    comparison_label: { type: "string", label: "Comparison Label", default: "Comparison" },
+    value_format: { type: "string", label: "Format: currency / percent / number", default: "currency" },
+    value_prefix: { type: "string", label: "Value Prefix", default: "€" }
   },
 
   create: function(element) {
-
     element.innerHTML = `
       <style>
-
-        .lc-wrap {
-          width: 100%;
-          min-height: 620px;
-          background: #030303;
-          color: white;
-          font-family: Inter, Arial, sans-serif;
-          padding: 34px 42px;
-          box-sizing: border-box;
-          overflow: auto;
-        }
-
-        .lc-title {
-          font-size: 30px;
-          font-weight: 900;
-          margin-bottom: 10px;
-        }
-
-        .lc-legend {
-          display: flex;
-          gap: 22px;
-          margin-bottom: 28px;
-          font-size: 12px;
-          color: rgba(255,255,255,0.8);
-        }
-
-        .lc-legend-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .lc-dot-small {
-          width: 11px;
-          height: 11px;
-          border-radius: 50%;
-        }
-
-        .lc-chart {
-          position: relative;
-          width: 100%;
-        }
-
-        .lc-row {
-          display: grid;
-          grid-template-columns: 160px 1fr 110px;
-          align-items: center;
-          height: 36px;
-          gap: 14px;
-        }
-
-        .lc-label {
-          font-size: 12px;
-          font-weight: 700;
-          color: rgba(255,255,255,0.86);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .lc-track {
-          position: relative;
-          height: 24px;
-        }
-
-        .lc-line {
-          position: absolute;
-          top: 50%;
-          height: 1px;
-          background: rgba(255,255,255,0.35);
-          transform: translateY(-50%);
-        }
-
-        .lc-dot {
-          position: absolute;
-          top: 50%;
-          width: 15px;
-          height: 15px;
-          border-radius: 50%;
-          transform: translate(-50%, -50%);
-        }
-
-        .lc-dot.current {
-          box-shadow: 0 0 12px currentColor;
-          z-index: 2;
-        }
-
-        .lc-dot.comparison {
-          opacity: 0.5;
-          z-index: 1;
-        }
-
-        .lc-value {
-          font-size: 11px;
-          font-weight: 700;
-          text-align: right;
-          color: rgba(255,255,255,0.82);
-        }
-
-        .lc-axis {
-          margin-left: 174px;
-          margin-right: 124px;
-          height: 24px;
-          position: relative;
-          border-top: 1px solid rgba(255,255,255,0.18);
-          margin-top: 14px;
-        }
-
-        .lc-axis-label {
-          position: absolute;
-          top: 7px;
-          transform: translateX(-50%);
-          font-size: 10px;
-          color: rgba(255,255,255,0.5);
-        }
-
-        .lc-empty {
-          padding: 30px;
-          color: white;
-        }
-
+        .lc-wrap{width:100%;height:100%;min-height:300px;background:#030303;color:white;font-family:Inter,Arial,sans-serif;padding:24px;box-sizing:border-box;overflow:auto}
+        .lc-title{font-size:clamp(18px,3vw,30px);font-weight:900;margin-bottom:12px}
+        .lc-legend{display:flex;gap:18px;font-size:12px;color:rgba(255,255,255,.75);margin-bottom:18px}
+        .lg{display:flex;gap:7px;align-items:center}.s{width:11px;height:11px;border-radius:50%}
+        .row{display:grid;grid-template-columns:150px 1fr 90px;gap:14px;align-items:center;height:34px}
+        .label{font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .track{height:24px;position:relative}
+        .line{position:absolute;top:50%;height:1px;background:rgba(255,255,255,.35)}
+        .dot{position:absolute;top:50%;width:15px;height:15px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer}
+        .current{background:#36a9d6;box-shadow:0 0 12px #36a9d6}.comparison{background:#ff9f2f;opacity:.5}
+        .val{text-align:right;font-size:11px;font-weight:800}
+        .muted{opacity:.16}
       </style>
-
-      <div class="lc-wrap">
-
-        <div class="lc-title"></div>
-
-        <div class="lc-legend"></div>
-
-        <div class="lc-chart"></div>
-
-      </div>
+      <div class="lc-wrap"><div class="lc-title"></div><div class="lc-legend"></div><div class="lc-chart"></div></div>
     `;
   },
 
-  updateAsync: function(
-    data,
-    element,
-    config,
-    queryResponse,
-    details,
-    done
-  ) {
+  updateAsync: function(data, element, config, queryResponse, details, done) {
+    const title = element.querySelector(".lc-title");
+    const legend = element.querySelector(".lc-legend");
+    const chart = element.querySelector(".lc-chart");
+    title.innerText = config.title || "Revenue Comparison";
 
-    const titleEl =
-      element.querySelector(".lc-title");
-
-    const legendEl =
-      element.querySelector(".lc-legend");
-
-    const chartEl =
-      element.querySelector(".lc-chart");
-
-    titleEl.innerText =
-      config.title || "Revenue Comparison";
-
-    const dimensions =
-      queryResponse.fields.dimension_like || [];
-
-    const measures =
-      queryResponse.fields.measure_like || [];
-
-    if (
-      !data ||
-      data.length === 0 ||
-      dimensions.length < 1 ||
-      measures.length < 2
-    ) {
-
-      chartEl.innerHTML = `
-        <div class="lc-empty">
-          Add:
-          <br><br>
-          1 Dimension
-          <br>
-          2 Measures
-        </div>
-      `;
-
-      done();
-      return;
+    const dims = queryResponse.fields.dimension_like || [];
+    const ms = queryResponse.fields.measure_like || [];
+    if (!data?.length || dims.length < 1 || ms.length < 2) {
+      chart.innerHTML = "Needs 1 dimension and 2 measures.";
+      done(); return;
     }
 
-    const categoryField =
-      dimensions[0].name;
+    legend.innerHTML = `
+      <div class="lg"><span class="s" style="background:#36a9d6"></span>${config.current_label||"Current"}</div>
+      <div class="lg"><span class="s" style="background:#ff9f2f;opacity:.5"></span>${config.comparison_label||"Comparison"}</div>`;
 
-    const currentField =
-      measures[0].name;
+    const dF=dims[0].name, cF=ms[0].name, pF=ms[1].name;
+    const rows = data.map(r=>({cat:r[dF]?.value||"-", cur:Number(r[cF]?.value||0), comp:Number(r[pF]?.value||0)}));
+    const all = rows.flatMap(r=>[r.cur,r.comp]);
+    const min = Math.min(...all,0), max = Math.max(...all,1), range=max-min||1;
+    const scale = v => ((v-min)/range)*100;
 
-    const comparisonField =
-      measures[1].name;
-
-    const currentColor =
-      "#36a9d6";
-
-    const comparisonColor =
-      "#ff9f2f";
-
-    legendEl.innerHTML = `
-      <div class="lc-legend-item">
-        <span
-          class="lc-dot-small"
-          style="background:${currentColor};">
-        </span>
-
-        ${config.current_label || "Current"}
-      </div>
-
-      <div class="lc-legend-item">
-        <span
-          class="lc-dot-small"
-          style="background:${comparisonColor}; opacity:0.5;">
-        </span>
-
-        ${config.comparison_label || "Comparison"}
-      </div>
-    `;
-
-    let rows = data.map(row => {
-
-      const category =
-        row[categoryField]?.value || "-";
-
-      const current =
-        Number(
-          row[currentField]?.value || 0
-        );
-
-      const comparison =
-        Number(
-          row[comparisonField]?.value || 0
-        );
-
-      return {
-        category,
-        current,
-        comparison
-      };
-    });
-
-    if ((config.sort_by || "data_order") === "comparison") {
-
-      rows.sort(
-        (a, b) =>
-          b.comparison - a.comparison
-      );
-
-    } else if (
-      (config.sort_by || "data_order") === "current"
-    ) {
-
-      rows.sort(
-        (a, b) =>
-          b.current - a.current
-      );
-
-    } else if (
-      (config.sort_by || "data_order") === "difference"
-    ) {
-
-      rows.sort(
-        (a, b) =>
-          Math.abs(
-            b.current - b.comparison
-          ) -
-          Math.abs(
-            a.current - a.comparison
-          )
-      );
-    }
-
-    const allValues =
-      rows.flatMap(r => [
-        r.current,
-        r.comparison
-      ]);
-
-    const minValue =
-      Math.min(...allValues, 0);
-
-    const maxValue =
-      Math.max(...allValues, 1);
-
-    const range =
-      maxValue - minValue || 1;
-
-    const scale = value =>
-      ((value - minValue) / range) * 100;
-
-    const formatValue = value => {
-
-      const prefix =
-        config.value_prefix || "€";
-
-      if (Math.abs(value) >= 1000000) {
-
-        return (
-          prefix +
-          (value / 1000000).toFixed(1) +
-          "M"
-        );
-      }
-
-      if (Math.abs(value) >= 1000) {
-
-        return (
-          prefix +
-          (value / 1000).toFixed(0) +
-          "K"
-        );
-      }
-
-      return (
-        prefix +
-        Number(value).toLocaleString(
-          undefined,
-          {
-            maximumFractionDigits: 0
-          }
-        )
-      );
+    const fmt = v => {
+      if (config.value_format === "percent") return (Math.abs(v)<=1?v*100:v).toFixed(1)+"%";
+      if (config.value_format === "number") return v.toLocaleString(undefined,{maximumFractionDigits:0});
+      const p=config.value_prefix||"€";
+      if(Math.abs(v)>=1e6)return p+(v/1e6).toFixed(1)+"M";
+      if(Math.abs(v)>=1e3)return p+(v/1e3).toFixed(0)+"K";
+      return p+v.toLocaleString(undefined,{maximumFractionDigits:0});
     };
 
-    let html = "";
-
-    rows.forEach(row => {
-
-      const currentX =
-        scale(row.current);
-
-      const comparisonX =
-        scale(row.comparison);
-
-      const left =
-        Math.min(currentX, comparisonX);
-
-      const width =
-        Math.abs(
-          currentX - comparisonX
-        );
-
-      const diff =
-        row.current - row.comparison;
-
-      const diffText =
-        diff >= 0
-          ? "+" + formatValue(diff)
-          : formatValue(diff);
-
-      html += `
-
-        <div class="lc-row">
-
-          <div class="lc-label">
-            ${row.category}
-          </div>
-
-          <div class="lc-track">
-
-            <div
-              class="lc-line"
-              style="
-                left:${left}%;
-                width:${width}%;
-              ">
-            </div>
-
-            <div
-              class="lc-dot comparison"
-              title="${config.comparison_label}: ${formatValue(row.comparison)}"
-              style="
-                left:${comparisonX}%;
-                background:${comparisonColor};
-                color:${comparisonColor};
-              ">
-            </div>
-
-            <div
-              class="lc-dot current"
-              title="${config.current_label}: ${formatValue(row.current)}"
-              style="
-                left:${currentX}%;
-                background:${currentColor};
-                color:${currentColor};
-              ">
-            </div>
-
-          </div>
-
-          <div class="lc-value">
-            ${diffText}
-          </div>
-
+    chart.innerHTML = rows.map((r,i)=>{
+      const x1=scale(r.cur), x2=scale(r.comp), l=Math.min(x1,x2), w=Math.abs(x1-x2);
+      const diff=r.cur-r.comp;
+      return `<div class="row" data-i="${i}">
+        <div class="label">${r.cat}</div>
+        <div class="track">
+          <div class="line" style="left:${l}%;width:${w}%;"></div>
+          <div class="dot comparison" title="${config.comparison_label}: ${fmt(r.comp)}" style="left:${x2}%"></div>
+          <div class="dot current" title="${config.current_label}: ${fmt(r.cur)}" style="left:${x1}%"></div>
         </div>
-      `;
+        <div class="val">${diff>=0?"+":""}${fmt(diff)}</div>
+      </div>`;
+    }).join("");
+
+    [...chart.querySelectorAll(".row")].forEach(row=>{
+      row.onclick=()=>{
+        const active=row.classList.contains("active");
+        [...chart.querySelectorAll(".row")].forEach(r=>r.classList.remove("active","muted"));
+        if(!active){[...chart.querySelectorAll(".row")].forEach(r=>r.classList.add("muted"));row.classList.remove("muted");row.classList.add("active");}
+      };
     });
-
-    html += `
-
-      <div class="lc-axis">
-
-        <div
-          class="lc-axis-label"
-          style="left:0%;">
-          ${formatValue(minValue)}
-        </div>
-
-        <div
-          class="lc-axis-label"
-          style="left:50%;">
-          ${formatValue(
-            (minValue + maxValue) / 2
-          )}
-        </div>
-
-        <div
-          class="lc-axis-label"
-          style="left:100%;">
-          ${formatValue(maxValue)}
-        </div>
-
-      </div>
-    `;
-
-    chartEl.innerHTML = html;
 
     done();
   }
