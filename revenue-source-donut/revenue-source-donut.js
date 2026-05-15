@@ -2,267 +2,83 @@ looker.plugins.visualizations.add({
   id: "revenue_source_donut",
   label: "Revenue Source Donut",
 
+  options: {
+    title: { type: "string", label: "Title", default: "Revenue By Source" },
+    value_format: { type: "string", label: "Format: currency / percent / number", default: "currency" },
+    value_prefix: { type: "string", label: "Value Prefix", default: "€" }
+  },
+
   create: function(element) {
     element.innerHTML = `
       <style>
-        .rs-wrap {
-          width: 100%;
-          min-height: 620px;
-          background: #050505;
-          color: white;
-          font-family: Inter, Arial, sans-serif;
-          position: relative;
-          overflow: hidden;
-          padding: 28px;
-          box-sizing: border-box;
-        }
-
-        .rs-title {
-          position: absolute;
-          top: 28px;
-          left: 34%;
-          transform: translateX(-20%);
-          font-size: 32px;
-          font-weight: 800;
-        }
-
-        .rs-chart-area {
-          position: absolute;
-          left: 50%;
-          top: 53%;
-          transform: translate(-50%, -50%);
-          width: 420px;
-          height: 420px;
-          border-radius: 50%;
-          background: #181812;
-          box-shadow: 0 0 0 18px rgba(255,255,255,0.08);
-        }
-
-        .rs-donut {
-          width: 100%;
-          height: 100%;
-          border-radius: 50%;
-        }
-
-        .rs-hole {
-          position: absolute;
-          width: 135px;
-          height: 135px;
-          border-radius: 50%;
-          background: #050505;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%);
-          border: 8px solid #f5f5f5;
-          box-sizing: border-box;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          font-size: 11px;
-          color: #222;
-        }
-
-        .rs-hole span {
-          background: white;
-          padding: 10px 14px;
-          border-radius: 10px;
-        }
-
-        .rs-label {
-          position: absolute;
-          max-width: 210px;
-        }
-
-        .rs-name {
-          font-size: 12px;
-          font-weight: 700;
-          color: white;
-        }
-
-        .rs-percent {
-          font-size: 42px;
-          font-weight: 900;
-          line-height: 0.95;
-        }
-
-        .rs-line {
-          position: absolute;
-          height: 1px;
-          background: rgba(255,255,255,0.75);
-        }
-
-        .rs-overview {
-          position: absolute;
-          left: 50%;
-          bottom: 35px;
-          transform: translateX(-50%);
-          width: 420px;
-          text-align: left;
-        }
-
-        .rs-overview-title {
-          font-size: 22px;
-          font-weight: 800;
-          margin-bottom: 8px;
-        }
-
-        .rs-overview-text {
-          font-size: 11px;
-          line-height: 1.35;
-          color: rgba(255,255,255,0.82);
-        }
-
-        .rs-empty {
-          padding: 30px;
-          color: white;
-          font-family: Inter, Arial;
-        }
+        .rs-wrap{width:100%;height:100%;min-height:320px;background:#030303;color:white;font-family:Inter,Arial,sans-serif;padding:24px;box-sizing:border-box;position:relative;overflow:hidden}
+        .rs-title{font-size:clamp(18px,3vw,30px);font-weight:900;margin-bottom:12px}
+        .rs-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,.8fr);gap:24px;height:calc(100% - 50px);align-items:center}
+        .rs-donut{width:min(48vh,42vw,360px);aspect-ratio:1;border-radius:50%;margin:auto;position:relative;cursor:pointer}
+        .rs-hole{position:absolute;inset:30%;background:#030303;border:6px solid rgba(255,255,255,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;text-align:center;font-size:clamp(10px,1.6vw,13px);font-weight:800}
+        .rs-list{overflow:auto;max-height:100%}
+        .rs-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-radius:10px;cursor:pointer;transition:.2s}
+        .rs-item:hover,.rs-item.active{background:rgba(255,255,255,.08)}
+        .rs-dot{width:12px;height:12px;border-radius:50%;flex:0 0 12px}
+        .rs-name{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800}
+        .rs-val{text-align:right;font-size:12px;color:rgba(255,255,255,.75)}
+        .rs-muted{opacity:.18}
       </style>
-
       <div class="rs-wrap">
-        <div class="rs-title">Revenue By Source</div>
-        <div id="rs-chart"></div>
+        <div class="rs-title"></div>
+        <div class="rs-layout"><div class="rs-donut"></div><div class="rs-list"></div></div>
       </div>
     `;
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
-    const wrap = element.querySelector(".rs-wrap");
-    const chart = element.querySelector("#rs-chart");
+    const title = element.querySelector(".rs-title");
+    const donut = element.querySelector(".rs-donut");
+    const list = element.querySelector(".rs-list");
+    title.innerText = config.title || "Revenue By Source";
 
-    if (!data || data.length === 0) {
-      chart.innerHTML = `<div class="rs-empty">No data available</div>`;
-      done();
-      return;
+    const dims = queryResponse.fields.dimension_like || [];
+    const ms = queryResponse.fields.measure_like || [];
+    if (!data?.length || dims.length < 1 || ms.length < 1) {
+      list.innerHTML = "Needs 1 dimension and 1 measure.";
+      done(); return;
     }
 
-    const dimensions = queryResponse.fields.dimension_like || [];
-    const measures = queryResponse.fields.measure_like || [];
+    const colors = ["#36a9d6","#ff9f2f","#e95fb8","#ef3d2f","#74d17c","#b994ff","#f6c85f","#4dd4ac"];
+    const dF = dims[0].name, mF = ms[0].name;
+    const rows = data.map((r,i)=>({name:String(r[dF]?.value||"Unknown"), value:Number(r[mF]?.value||0), color:colors[i%colors.length]})).filter(r=>r.value>0).sort((a,b)=>b.value-a.value);
+    const total = rows.reduce((s,r)=>s+r.value,0) || 1;
 
-    if (dimensions.length < 1 || measures.length < 1) {
-      chart.innerHTML = `
-        <div class="rs-empty">
-          This visualization needs 1 dimension and 1 measure:<br>
-          Source and Revenue
-        </div>
-      `;
-      done();
-      return;
-    }
+    const fmt = v => {
+      if (config.value_format === "percent") return (Math.abs(v)<=1 ? v*100 : v).toFixed(1)+"%";
+      if (config.value_format === "number") return v.toLocaleString(undefined,{maximumFractionDigits:0});
+      const p = config.value_prefix || "€";
+      if (Math.abs(v)>=1e6) return p+(v/1e6).toFixed(1)+"M";
+      if (Math.abs(v)>=1e3) return p+(v/1e3).toFixed(0)+"K";
+      return p+v.toLocaleString(undefined,{maximumFractionDigits:0});
+    };
 
-    const sourceField = dimensions[0].name;
-    const revenueField = measures[0].name;
+    let cur=0;
+    donut.style.background = `conic-gradient(${rows.map(r=>{const s=cur; cur += r.value/total*100; return `${r.color} ${s}% ${cur}%`;}).join(",")})`;
+    donut.innerHTML = `<div class="rs-hole">Total<br>${fmt(total)}</div>`;
 
-    const colors = [
-      "#f39a3d",
-      "#36a9d6",
-      "#ef3d2f",
-      "#d965b6",
-      "#7bc8e6",
-      "#f6c06a",
-      "#8bd17c",
-      "#b994ff"
-    ];
-
-    const rows = data
-      .map((row, index) => {
-        const source = row[sourceField]?.value || "Unknown";
-        const revenue = Number(row[revenueField]?.value || 0);
-
-        return {
-          source,
-          revenue,
-          color: colors[index % colors.length]
-        };
-      })
-      .filter(row => row.revenue > 0)
-      .sort((a, b) => b.revenue - a.revenue);
-
-    const total = rows.reduce((sum, row) => sum + row.revenue, 0);
-
-    if (!total) {
-      chart.innerHTML = `<div class="rs-empty">No revenue data available</div>`;
-      done();
-      return;
-    }
-
-    let current = 0;
-
-    const gradientParts = rows.map(row => {
-      const start = current;
-      const pct = row.revenue / total * 100;
-      current += pct;
-      return `${row.color} ${start}% ${current}%`;
-    });
-
-    const donutBackground = `conic-gradient(${gradientParts.join(", ")})`;
-
-    const labelPositions = [
-      { left: "67%", top: "90px", align: "left" },
-      { left: "67%", top: "305px", align: "left" },
-      { left: "70px", top: "305px", align: "left" },
-      { left: "75px", top: "115px", align: "left" },
-      { left: "75px", top: "445px", align: "left" },
-      { left: "67%", top: "445px", align: "left" }
-    ];
-
-    const linePositions = [
-      { left: "58%", top: "150px", width: "180px" },
-      { left: "58%", top: "355px", width: "180px" },
-      { left: "150px", top: "355px", width: "150px" },
-      { left: "150px", top: "185px", width: "150px" },
-      { left: "150px", top: "505px", width: "150px" },
-      { left: "58%", top: "505px", width: "180px" }
-    ];
-
-    let labelsHTML = "";
-
-    rows.slice(0, 6).forEach((row, index) => {
-      const pct = row.revenue / total * 100;
-      const pos = labelPositions[index] || labelPositions[0];
-      const line = linePositions[index] || linePositions[0];
-
-      labelsHTML += `
-        <div
-          class="rs-label"
-          style="left:${pos.left}; top:${pos.top}; text-align:${pos.align};"
-        >
-          <div class="rs-name">${row.source}</div>
-          <div class="rs-percent" style="color:${row.color};">
-            ${pct.toFixed(0)}%
-          </div>
-        </div>
-
-        <div
-          class="rs-line"
-          style="left:${line.left}; top:${line.top}; width:${line.width};"
-        ></div>
-      `;
-    });
-
-    const topSource = rows[0];
-    const topPct = topSource.revenue / total * 100;
-
-    chart.innerHTML = `
-      <div class="rs-chart-area">
-        <div class="rs-donut" style="background:${donutBackground};"></div>
-        <div class="rs-hole">
-          <span>Total<br>€${Math.round(total).toLocaleString()}</span>
-        </div>
+    list.innerHTML = rows.map((r,i)=>`
+      <div class="rs-item" data-i="${i}">
+        <div class="rs-name"><span class="rs-dot" style="background:${r.color}"></span>${r.name}</div>
+        <div class="rs-val">${(r.value/total*100).toFixed(1)}%<br>${fmt(r.value)}</div>
       </div>
+    `).join("");
 
-      ${labelsHTML}
-
-      <div class="rs-overview">
-        <div class="rs-overview-title">Overview</div>
-        <div class="rs-overview-text">
-          Total revenue is distributed across ${rows.length} sources.
-          The leading source is ${topSource.source}, contributing
-          ${topPct.toFixed(1)}% of total revenue.
-        </div>
-      </div>
-    `;
+    [...list.querySelectorAll(".rs-item")].forEach(item=>{
+      item.onclick = () => {
+        const active = item.classList.contains("active");
+        [...list.querySelectorAll(".rs-item")].forEach(x=>x.classList.remove("active","rs-muted"));
+        if (!active) {
+          [...list.querySelectorAll(".rs-item")].forEach(x=>x.classList.add("rs-muted"));
+          item.classList.remove("rs-muted"); item.classList.add("active");
+        }
+      };
+    });
 
     done();
   }
