@@ -3,9 +3,16 @@ looker.plugins.visualizations.add({
   label: "Source Market World Map",
 
   options: {
-    title: { type: "string", label: "Title", default: "Source Market Intelligence" },
-    value_prefix: { type: "string", label: "Currency Prefix", default: "€" },
-    max_country_label_chars: { type: "number", label: "Max Country Label Chars", default: 18 }
+    title: {
+      type: "string",
+      label: "Title",
+      default: "Source Market Intelligence"
+    },
+    value_prefix: {
+      type: "string",
+      label: "Currency Prefix",
+      default: "€"
+    }
   },
 
   create: function(element) {
@@ -42,31 +49,9 @@ looker.plugins.visualizations.add({
         .smm-chart {
           width: 100%;
           height: calc(100% - 58px);
-          min-height: 180px;
+          min-height: 220px;
           position: relative;
           overflow: hidden;
-        }
-
-        .smm-chart svg {
-          width: 100%;
-          height: 100%;
-          display: block;
-        }
-
-        .smm-tooltip {
-          position: absolute;
-          pointer-events: none;
-          background: rgba(10,10,10,0.96);
-          color: white;
-          border: 1px solid rgba(255,255,255,0.16);
-          border-radius: 12px;
-          padding: 10px 12px;
-          font-size: 12px;
-          line-height: 1.45;
-          box-shadow: 0 10px 28px rgba(0,0,0,0.5);
-          opacity: 0;
-          z-index: 30;
-          max-width: 280px;
         }
 
         .smm-empty {
@@ -80,7 +65,6 @@ looker.plugins.visualizations.add({
         <div class="smm-title"></div>
         <div class="smm-subtitle">Revenue, ADR, bookings and guest volume by source market</div>
         <div class="smm-chart"></div>
-        <div class="smm-tooltip"></div>
       </div>
     `;
   },
@@ -88,7 +72,6 @@ looker.plugins.visualizations.add({
   updateAsync: function(data, element, config, queryResponse, details, done) {
     const titleEl = element.querySelector(".smm-title");
     const chartEl = element.querySelector(".smm-chart");
-    const tooltipEl = element.querySelector(".smm-tooltip");
 
     titleEl.innerText = config.title || "Source Market Intelligence";
 
@@ -113,7 +96,10 @@ looker.plugins.visualizations.add({
     function loadScript(src) {
       return new Promise((resolve, reject) => {
         const existing = document.querySelector("script[src='" + src + "']");
-        if (existing) return resolve();
+        if (existing) {
+          resolve();
+          return;
+        }
 
         const script = document.createElement("script");
         script.src = src;
@@ -124,20 +110,18 @@ looker.plugins.visualizations.add({
     }
 
     Promise.resolve()
-      .then(() => loadScript("https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"))
-      .then(() => loadScript("https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"))
-      .then(() => render())
-      .then(() => done())
+      .then(() => loadScript("https://cdn.plot.ly/plotly-2.35.2.min.js"))
+      .then(() => {
+        render();
+        done();
+      })
       .catch(() => {
-        chartEl.innerHTML = `<div class="smm-empty">Could not load map libraries.</div>`;
+        chartEl.innerHTML = `<div class="smm-empty">Could not load Plotly library.</div>`;
         done();
       });
 
-    async function render() {
+    function render() {
       chartEl.innerHTML = "";
-
-      const d3 = window.d3;
-      const topojson = window.topojson;
 
       const countryField = dimensions[0].name;
       const revenueField = measures[0].name;
@@ -147,39 +131,10 @@ looker.plugins.visualizations.add({
 
       const prefix = config.value_prefix || "€";
 
-      function normalizeCountry(name) {
-        return String(name || "")
-          .toLowerCase()
-          .replace(/&/g, "and")
-          .replace(/\./g, "")
-          .replace(/the /g, "")
-          .replace(/republic of /g, "")
-          .replace(/kingdom of /g, "")
+      function clean(value) {
+        return String(value || "")
+          .replace(/(<([^>]+)>)/gi, "")
           .trim();
-      }
-
-      const aliases = {
-        "united states": "united states of america",
-        "usa": "united states of america",
-        "us": "united states of america",
-        "uk": "united kingdom",
-        "u k": "united kingdom",
-        "russia": "russian federation",
-        "south korea": "korea, republic of",
-        "north korea": "korea, democratic people's republic of",
-        "vietnam": "viet nam",
-        "iran": "iran, islamic republic of",
-        "syria": "syrian arab republic",
-        "moldova": "moldova, republic of",
-        "bolivia": "bolivia, plurinational state of",
-        "venezuela": "venezuela, bolivarian republic of",
-        "tanzania": "tanzania, united republic of",
-        "czech republic": "czechia"
-      };
-
-      function countryKey(name) {
-        const n = normalizeCountry(name);
-        return aliases[n] || n;
       }
 
       function formatCurrency(v) {
@@ -189,273 +144,158 @@ looker.plugins.visualizations.add({
         if (abs >= 1000000) return sign + prefix + (abs / 1000000).toFixed(1) + "M";
         if (abs >= 1000) return sign + prefix + (abs / 1000).toFixed(0) + "K";
 
-        return sign + prefix + abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        return sign + prefix + abs.toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
       }
 
       function formatADR(v) {
-        return prefix + Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+        return prefix + Number(v || 0).toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
       }
 
       function formatNumber(v) {
-        return Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+        return Number(v || 0).toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
       }
 
-      const marketMap = new Map();
+      const rows = data
+        .map(row => {
+          const country =
+            clean(row[countryField]?.rendered) ||
+            clean(row[countryField]?.value) ||
+            "Unknown";
 
-      data.forEach(row => {
-        const countryRaw =
-          row[countryField]?.rendered ||
-          row[countryField]?.value ||
-          "Unknown";
-
-        const country = String(countryRaw).replace(/(<([^>]+)>)/gi, "");
-        const key = countryKey(country);
-
-        const current = marketMap.get(key) || {
-          country,
-          revenue: 0,
-          adrWeightedRevenue: 0,
-          bookings: 0,
-          guests: 0
-        };
-
-        const revenue = Number(row[revenueField]?.value || 0);
-        const adr = Number(row[adrField]?.value || 0);
-        const bookings = Number(row[bookingsField]?.value || 0);
-        const guests = Number(row[guestsField]?.value || 0);
-
-        current.revenue += revenue;
-        current.adrWeightedRevenue += adr * Math.max(bookings, 1);
-        current.bookings += bookings;
-        current.guests += guests;
-
-        marketMap.set(key, current);
-      });
-
-      marketMap.forEach(v => {
-        v.adr = v.bookings > 0
-          ? v.adrWeightedRevenue / v.bookings
-          : 0;
-      });
-
-      const totalRevenue = Array.from(marketMap.values())
-        .reduce((sum, d) => sum + d.revenue, 0) || 1;
-
-      const maxRevenue = d3.max(Array.from(marketMap.values()), d => d.revenue) || 1;
-
-      const bounds = chartEl.getBoundingClientRect();
-      const width = Math.max(bounds.width, 320);
-      const height = Math.max(bounds.height, 180);
-
-      const svg = d3
-        .select(chartEl)
-        .append("svg")
-        .attr("viewBox", `0 0 ${width} ${height}`)
-        .attr("preserveAspectRatio", "xMidYMid meet");
-
-      const world = await d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json");
-      const namesText = await d3.text("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.tsv");
-
-      const nameById = new Map(
-        d3.tsvParse(namesText).map(d => [d.id, d.name])
-      );
-
-      const countries = topojson.feature(world, world.objects.countries).features;
-
-      countries.forEach(d => {
-        d.properties.name = nameById.get(String(d.id).padStart(3, "0")) || nameById.get(String(d.id)) || "Unknown";
-      });
-
-      const projection = d3.geoNaturalEarth1()
-        .fitSize([width, height * 0.92], { type: "FeatureCollection", features: countries });
-
-      const path = d3.geoPath(projection);
-
-      const color = d3.scaleLinear()
-        .domain([0, maxRevenue * 0.35, maxRevenue])
-        .range(["rgba(54,169,214,0.10)", "#36a9d6", "#b994ff"]);
-
-      svg.append("rect")
-        .attr("x", 0)
-        .attr("y", 0)
-        .attr("width", width)
-        .attr("height", height)
-        .attr("fill", "#030303");
-
-      const countryPaths = svg.append("g")
-        .selectAll("path")
-        .data(countries)
-        .enter()
-        .append("path")
-        .attr("d", path)
-        .attr("fill", d => {
-          const metric = marketMap.get(countryKey(d.properties.name));
-          return metric ? color(metric.revenue) : "rgba(255,255,255,0.06)";
+          return {
+            country,
+            revenue: Number(row[revenueField]?.value || 0),
+            adr: Number(row[adrField]?.value || 0),
+            bookings: Number(row[bookingsField]?.value || 0),
+            guests: Number(row[guestsField]?.value || 0)
+          };
         })
-        .attr("stroke", "rgba(255,255,255,0.16)")
-        .attr("stroke-width", 0.45)
-        .attr("opacity", d => marketMap.get(countryKey(d.properties.name)) ? 0.92 : 0.45)
-        .style("cursor", d => marketMap.get(countryKey(d.properties.name)) ? "pointer" : "default")
-        .on("mousemove", function(event, d) {
-          const metric = marketMap.get(countryKey(d.properties.name));
-          if (!metric) return;
+        .filter(row => row.country && row.country !== "∅" && row.revenue > 0);
 
-          countryPaths.attr("opacity", c =>
-            countryKey(c.properties.name) === countryKey(d.properties.name) ? 1 : 0.18
-          );
+      if (!rows.length) {
+        chartEl.innerHTML = `<div class="smm-empty">No valid country data found.</div>`;
+        return;
+      }
 
-          d3.select(this)
-            .attr("stroke", "rgba(255,255,255,0.9)")
-            .attr("stroke-width", 1.2);
+      const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0) || 1;
 
-          const point = d3.pointer(event, chartEl);
-          const share = metric.revenue / totalRevenue * 100;
+      const locations = rows.map(r => r.country);
+      const zValues = rows.map(r => r.revenue);
 
-          let insight = "Balanced source market contribution";
-          let insightColor = "#36a9d6";
+      const hoverText = rows.map(r => {
+        const share = (r.revenue / totalRevenue) * 100;
 
-          if (share >= 30) {
-            insight = "High international dependency";
-            insightColor = "#ef3d2f";
-          } else if (metric.adr >= d3.quantile(Array.from(marketMap.values()).map(x => x.adr).sort(d3.ascending), 0.75)) {
-            insight = "High-value source market";
-            insightColor = "#ff9f2f";
-          } else if (metric.bookings >= d3.quantile(Array.from(marketMap.values()).map(x => x.bookings).sort(d3.ascending), 0.75)) {
-            insight = "Strong booking volume market";
-            insightColor = "#74d17c";
-          } else if (share <= 3 && metric.revenue > 0) {
-            insight = "Emerging or low exposure market";
-            insightColor = "#e95fb8";
+        let insight = "Balanced source market contribution";
+
+        if (share >= 30) {
+          insight = "High international dependency";
+        } else if (r.adr >= Math.max(...rows.map(x => x.adr)) * 0.85) {
+          insight = "High-value source market";
+        } else if (r.bookings >= Math.max(...rows.map(x => x.bookings)) * 0.75) {
+          insight = "Strong booking volume market";
+        } else if (share <= 3) {
+          insight = "Emerging or low exposure market";
+        }
+
+        return `
+          <b>${r.country}</b><br>
+          Revenue: <b>${formatCurrency(r.revenue)}</b><br>
+          ADR: <b>${formatADR(r.adr)}</b><br>
+          Bookings: <b>${formatNumber(r.bookings)}</b><br>
+          Guests: <b>${formatNumber(r.guests)}</b><br>
+          Revenue Share: <b>${share.toFixed(1)}%</b><br>
+          ${insight}
+        `;
+      });
+
+      const plotData = [{
+        type: "choropleth",
+        locationmode: "country names",
+        locations: locations,
+        z: zValues,
+        text: hoverText,
+        hovertemplate: "%{text}<extra></extra>",
+        colorscale: [
+          [0, "rgba(54,169,214,0.18)"],
+          [0.45, "#36a9d6"],
+          [1, "#b994ff"]
+        ],
+        marker: {
+          line: {
+            color: "rgba(255,255,255,0.18)",
+            width: 0.5
           }
+        },
+        colorbar: {
+          title: "",
+          thickness: 8,
+          len: 0.45,
+          x: 0.02,
+          y: 0.12,
+          bgcolor: "rgba(0,0,0,0)",
+          tickfont: {
+            color: "rgba(255,255,255,0.65)",
+            size: 10
+          }
+        }
+      }];
 
-          tooltipEl.style.opacity = 1;
-          tooltipEl.style.left = Math.min(point[0] + 14, width - 245) + "px";
-          tooltipEl.style.top = Math.max(point[1] - 18, 20) + "px";
+      const layout = {
+        paper_bgcolor: "#030303",
+        plot_bgcolor: "#030303",
+        margin: {
+          l: 0,
+          r: 0,
+          t: 0,
+          b: 0
+        },
+        geo: {
+          projection: {
+            type: "natural earth"
+          },
+          bgcolor: "#030303",
+          showframe: false,
+          showcoastlines: false,
+          showcountries: true,
+          countrycolor: "rgba(255,255,255,0.12)",
+          showland: true,
+          landcolor: "rgba(255,255,255,0.055)",
+          showocean: true,
+          oceancolor: "#030303",
+          lataxis: {
+            showgrid: false
+          },
+          lonaxis: {
+            showgrid: false
+          }
+        },
+        hoverlabel: {
+          bgcolor: "rgba(10,10,10,0.96)",
+          bordercolor: "rgba(255,255,255,0.18)",
+          font: {
+            color: "#ffffff",
+            family: "Inter, Arial, sans-serif",
+            size: 12
+          }
+        }
+      };
 
-          tooltipEl.innerHTML = `
-            <strong>${metric.country}</strong><br>
-            Revenue: <strong>${formatCurrency(metric.revenue)}</strong><br>
-            ADR: <strong>${formatADR(metric.adr)}</strong><br>
-            Bookings: <strong>${formatNumber(metric.bookings)}</strong><br>
-            Guests: <strong>${formatNumber(metric.guests)}</strong><br>
-            Revenue Share: <strong>${share.toFixed(1)}%</strong><br>
-            <span style="color:${insightColor};">${insight}</span>
-          `;
-        })
-        .on("mouseleave", function() {
-          countryPaths
-            .attr("opacity", d => marketMap.get(countryKey(d.properties.name)) ? 0.92 : 0.45)
-            .attr("stroke", "rgba(255,255,255,0.16)")
-            .attr("stroke-width", 0.45);
+      const plotConfig = {
+        responsive: true,
+        displayModeBar: false
+      };
 
-          tooltipEl.style.opacity = 0;
-        });
+      Plotly.newPlot(chartEl, plotData, layout, plotConfig);
 
-      const topMarkets = Array.from(marketMap.values())
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 5);
-
-      const panelX = width - Math.min(220, width * 0.34) - 12;
-      const panelY = 12;
-      const panelW = Math.min(220, width * 0.34);
-
-      if (width > 620 && topMarkets.length) {
-        const panel = svg.append("g")
-          .attr("transform", `translate(${panelX},${panelY})`);
-
-        panel.append("rect")
-          .attr("width", panelW)
-          .attr("height", 34 + topMarkets.length * 25)
-          .attr("rx", 14)
-          .attr("fill", "rgba(0,0,0,0.42)")
-          .attr("stroke", "rgba(255,255,255,0.12)");
-
-        panel.append("text")
-          .attr("x", 14)
-          .attr("y", 21)
-          .text("Top Markets")
-          .style("fill", "rgba(255,255,255,0.85)")
-          .style("font-size", "11px")
-          .style("font-weight", 900);
-
-        topMarkets.forEach((market, i) => {
-          const y = 45 + i * 25;
-          const share = market.revenue / totalRevenue * 100;
-
-          panel.append("circle")
-            .attr("cx", 16)
-            .attr("cy", y - 4)
-            .attr("r", 4)
-            .attr("fill", color(market.revenue));
-
-          panel.append("text")
-            .attr("x", 26)
-            .attr("y", y)
-            .text(
-              market.country.length > Number(config.max_country_label_chars || 18)
-                ? market.country.slice(0, Number(config.max_country_label_chars || 18)) + "…"
-                : market.country
-            )
-            .style("fill", "rgba(255,255,255,0.72)")
-            .style("font-size", "10px")
-            .style("font-weight", 700);
-
-          panel.append("text")
-            .attr("x", panelW - 12)
-            .attr("y", y)
-            .attr("text-anchor", "end")
-            .text(share.toFixed(1) + "%")
-            .style("fill", "rgba(255,255,255,0.55)")
-            .style("font-size", "10px")
-            .style("font-weight", 800);
-        });
-      }
-
-      const legendW = Math.min(170, width * 0.28);
-      const legendX = 16;
-      const legendY = height - 24;
-
-      const defs = svg.append("defs");
-
-      const gradient = defs.append("linearGradient")
-        .attr("id", "smm-legend-gradient")
-        .attr("x1", "0%")
-        .attr("x2", "100%");
-
-      gradient.append("stop")
-        .attr("offset", "0%")
-        .attr("stop-color", "rgba(54,169,214,0.10)");
-
-      gradient.append("stop")
-        .attr("offset", "55%")
-        .attr("stop-color", "#36a9d6");
-
-      gradient.append("stop")
-        .attr("offset", "100%")
-        .attr("stop-color", "#b994ff");
-
-      svg.append("rect")
-        .attr("x", legendX)
-        .attr("y", legendY)
-        .attr("width", legendW)
-        .attr("height", 7)
-        .attr("rx", 5)
-        .attr("fill", "url(#smm-legend-gradient)");
-
-      svg.append("text")
-        .attr("x", legendX)
-        .attr("y", legendY - 5)
-        .text("Low revenue")
-        .style("fill", "rgba(255,255,255,0.45)")
-        .style("font-size", "9px");
-
-      svg.append("text")
-        .attr("x", legendX + legendW)
-        .attr("y", legendY - 5)
-        .attr("text-anchor", "end")
-        .text("High revenue")
-        .style("fill", "rgba(255,255,255,0.45)")
-        .style("font-size", "9px");
+      window.addEventListener("resize", function() {
+        Plotly.Plots.resize(chartEl);
+      });
     }
   }
 });
