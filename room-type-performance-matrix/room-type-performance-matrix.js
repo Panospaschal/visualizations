@@ -1,26 +1,26 @@
 looker.plugins.visualizations.add({
   id: "room_type_performance_matrix",
-  label: "Room Type Performance Matrix",
+  label: "Room Type Revenue Positioning Matrix",
 
   options: {
     title: {
       type: "string",
       label: "Title",
-      default: "Room Type Performance Matrix"
+      default: "Room Type Revenue Positioning Matrix"
+    },
+    subtitle: {
+      type: "string",
+      label: "Subtitle",
+      default: "ADR, RevPAR and revenue contribution by room type"
     },
     value_prefix: {
       type: "string",
       label: "Currency Prefix",
       default: "€"
     },
-    occupancy_threshold: {
-      type: "number",
-      label: "Occupancy Threshold %",
-      default: 70
-    },
-    adr_threshold_mode: {
+    threshold_mode: {
       type: "string",
-      label: "ADR Threshold: median / average",
+      label: "Threshold Mode: median / average",
       default: "median"
     }
   },
@@ -32,7 +32,10 @@ looker.plugins.visualizations.add({
           width: 100%;
           height: 100%;
           min-height: 0;
-          background: #030303;
+          background:
+            radial-gradient(circle at top right, rgba(54,169,214,0.16), transparent 32%),
+            radial-gradient(circle at bottom left, rgba(185,148,255,0.12), transparent 34%),
+            #030303;
           color: white;
           font-family: Inter, Arial, sans-serif;
           padding: clamp(10px, 1.8vw, 28px);
@@ -41,19 +44,38 @@ looker.plugins.visualizations.add({
           position: relative;
         }
 
+        .rtpm-wrap::before {
+          content: "";
+          position: absolute;
+          inset: clamp(8px, 1.2vw, 18px);
+          border-radius: 22px;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.08);
+          pointer-events: none;
+        }
+
+        .rtpm-header {
+          position: relative;
+          z-index: 2;
+        }
+
         .rtpm-title {
           font-size: clamp(16px, 2.5vw, 30px);
-          font-weight: 900;
+          font-weight: 950;
           margin-bottom: 6px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          letter-spacing: -0.03em;
         }
 
         .rtpm-subtitle {
           font-size: clamp(10px, 1vw, 12px);
           color: rgba(255,255,255,0.55);
           margin-bottom: 12px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .rtpm-chart {
@@ -62,6 +84,7 @@ looker.plugins.visualizations.add({
           min-height: 180px;
           position: relative;
           overflow: hidden;
+          z-index: 2;
         }
 
         .rtpm-chart svg {
@@ -94,8 +117,10 @@ looker.plugins.visualizations.add({
       </style>
 
       <div class="rtpm-wrap">
-        <div class="rtpm-title"></div>
-        <div class="rtpm-subtitle">ADR, occupancy and revenue contribution by room type</div>
+        <div class="rtpm-header">
+          <div class="rtpm-title"></div>
+          <div class="rtpm-subtitle"></div>
+        </div>
         <div class="rtpm-chart"></div>
         <div class="rtpm-tooltip"></div>
       </div>
@@ -104,24 +129,25 @@ looker.plugins.visualizations.add({
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
     const titleEl = element.querySelector(".rtpm-title");
+    const subtitleEl = element.querySelector(".rtpm-subtitle");
     const chartEl = element.querySelector(".rtpm-chart");
     const tooltipEl = element.querySelector(".rtpm-tooltip");
 
-    titleEl.innerText = config.title || "Room Type Performance Matrix";
+    titleEl.innerText = config.title || "Room Type Revenue Positioning Matrix";
+    subtitleEl.innerText = config.subtitle || "ADR, RevPAR and revenue contribution by room type";
 
     const dimensions = queryResponse.fields.dimension_like || [];
     const measures = queryResponse.fields.measure_like || [];
 
-    if (!data || data.length === 0 || dimensions.length < 1 || measures.length < 5) {
+    if (!data || data.length === 0 || dimensions.length < 1 || measures.length < 4) {
       chartEl.innerHTML = `
         <div class="rtpm-empty">
-          Add 1 room type dimension and 5 measures.<br><br>
-          Dimension: Room Type<br>
-          Measure 1: ADR<br>
-          Measure 2: Occupancy<br>
-          Measure 3: Revenue<br>
-          Measure 4: RevPAR<br>
-          Measure 5: Booking Share
+          Add 1 room type dimension and 4 measures.<br><br>
+          Dimension: Room Types Short Name<br>
+          Measure 1: ADR Selected Year<br>
+          Measure 2: RevPAR Selected Year<br>
+          Measure 3: Room Revenue Selected Year<br>
+          Measure 4: Bookings Selected Year
         </div>
       `;
       done();
@@ -159,10 +185,9 @@ looker.plugins.visualizations.add({
 
       const roomField = dimensions[0].name;
       const adrField = measures[0].name;
-      const occField = measures[1].name;
+      const revparField = measures[1].name;
       const revenueField = measures[2].name;
-      const revparField = measures[3].name;
-      const bookingShareField = measures[4].name;
+      const bookingsField = measures[3].name;
 
       const prefix = config.value_prefix || "€";
 
@@ -184,23 +209,16 @@ looker.plugins.visualizations.add({
         });
       }
 
-      function formatADR(v) {
+      function formatEuro(v) {
         return prefix + Number(v || 0).toLocaleString(undefined, {
           maximumFractionDigits: 0
         });
       }
 
-      function formatPct(v) {
-        let num = Number(v || 0);
-        if (Math.abs(num) <= 1.2) num = num * 100;
-
-        return num.toFixed(1) + "%";
-      }
-
-      function pctValue(v) {
-        let num = Number(v || 0);
-        if (Math.abs(num) <= 1.2) num = num * 100;
-        return num;
+      function formatNumber(v) {
+        return Number(v || 0).toLocaleString(undefined, {
+          maximumFractionDigits: 0
+        });
       }
 
       const rows = data
@@ -213,21 +231,19 @@ looker.plugins.visualizations.add({
           return {
             roomType,
             adr: Number(row[adrField]?.value || 0),
-            occupancy: pctValue(row[occField]?.value || 0),
-            revenue: Number(row[revenueField]?.value || 0),
             revpar: Number(row[revparField]?.value || 0),
-            bookingShare: pctValue(row[bookingShareField]?.value || 0),
+            revenue: Number(row[revenueField]?.value || 0),
+            bookings: Number(row[bookingsField]?.value || 0),
             adrRendered: row[adrField]?.rendered || null,
-            occupancyRendered: row[occField]?.rendered || null,
-            revenueRendered: row[revenueField]?.rendered || null,
             revparRendered: row[revparField]?.rendered || null,
-            bookingShareRendered: row[bookingShareField]?.rendered || null
+            revenueRendered: row[revenueField]?.rendered || null,
+            bookingsRendered: row[bookingsField]?.rendered || null
           };
         })
         .filter(row =>
           row.roomType &&
           isFinite(row.adr) &&
-          isFinite(row.occupancy) &&
+          isFinite(row.revpar) &&
           isFinite(row.revenue)
         );
 
@@ -242,9 +258,9 @@ looker.plugins.visualizations.add({
 
       const margin = {
         top: 26,
-        right: 28,
-        bottom: width < 600 ? 48 : 38,
-        left: 66
+        right: 30,
+        bottom: width < 600 ? 48 : 40,
+        left: 68
       };
 
       const innerWidth = width - margin.left - margin.right;
@@ -256,76 +272,149 @@ looker.plugins.visualizations.add({
         .attr("viewBox", `0 0 ${width} ${height}`)
         .attr("preserveAspectRatio", "xMidYMid meet");
 
-      const maxOcc = Math.max(100, d3.max(rows, d => d.occupancy) || 100);
       const maxAdr = d3.max(rows, d => d.adr) || 1;
+      const maxRevpar = d3.max(rows, d => d.revpar) || 1;
       const maxRevenue = d3.max(rows, d => d.revenue) || 1;
 
-      const occThreshold = Number(config.occupancy_threshold || 70);
+      const thresholdMode = config.threshold_mode || "median";
 
       const adrThreshold =
-        (config.adr_threshold_mode || "median") === "average"
+        thresholdMode === "average"
           ? d3.mean(rows, d => d.adr)
           : d3.median(rows, d => d.adr);
 
+      const revparThreshold =
+        thresholdMode === "average"
+          ? d3.mean(rows, d => d.revpar)
+          : d3.median(rows, d => d.revpar);
+
       const x = d3.scaleLinear()
-        .domain([0, Math.min(110, maxOcc * 1.08)])
+        .domain([0, maxAdr * 1.16])
         .range([margin.left, margin.left + innerWidth]);
 
       const y = d3.scaleLinear()
-        .domain([0, maxAdr * 1.15])
+        .domain([0, maxRevpar * 1.18])
         .range([margin.top + innerHeight, margin.top]);
 
       const r = d3.scaleSqrt()
         .domain([0, maxRevenue])
-        .range([6, Math.max(18, Math.min(44, Math.min(width, height) * 0.07))]);
-
-      function quadrant(d) {
-        const highOcc = d.occupancy >= occThreshold;
-        const highAdr = d.adr >= adrThreshold;
-
-        if (highOcc && highAdr) return {
-          label: "Star inventory",
-          color: "#74d17c",
-          description: "High ADR and high occupancy"
-        };
-
-        if (!highOcc && highAdr) return {
-          label: "Overpriced inventory",
-          color: "#ff9f2f",
-          description: "High ADR but lower demand"
-        };
-
-        if (highOcc && !highAdr) return {
-          label: "Underpriced inventory",
-          color: "#36a9d6",
-          description: "High occupancy with ADR upside"
-        };
-
-        return {
-          label: "Weak performing inventory",
-          color: "#ef3d2f",
-          description: "Low ADR and low occupancy"
-        };
-      }
+        .range([7, Math.max(20, Math.min(46, Math.min(width, height) * 0.075))]);
 
       const defs = svg.append("defs");
 
+      const bubbleGradient = defs.append("radialGradient")
+        .attr("id", "rtpm-bubble-gradient")
+        .attr("cx", "35%")
+        .attr("cy", "30%")
+        .attr("r", "70%");
+
+      bubbleGradient.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", "#7bc8e6")
+        .attr("stop-opacity", 1);
+
+      bubbleGradient.append("stop")
+        .attr("offset", "65%")
+        .attr("stop-color", "#36a9d6")
+        .attr("stop-opacity", 0.9);
+
+      bubbleGradient.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", "#1c6f91")
+        .attr("stop-opacity", 0.85);
+
       const glow = defs.append("filter")
-        .attr("id", "rtpm-glow")
-        .attr("x", "-50%")
-        .attr("y", "-50%")
-        .attr("width", "200%")
-        .attr("height", "200%");
+        .attr("id", "rtpm-cyan-glow")
+        .attr("x", "-80%")
+        .attr("y", "-80%")
+        .attr("width", "260%")
+        .attr("height", "260%");
 
       glow.append("feGaussianBlur")
-        .attr("stdDeviation", 3)
+        .attr("stdDeviation", 4)
         .attr("result", "blur");
+
+      glow.append("feColorMatrix")
+        .attr("in", "blur")
+        .attr("type", "matrix")
+        .attr("values", "0 0 0 0 0.22  0 0 0 0 0.66  0 0 0 0 0.84  0 0 0 0.9 0")
+        .attr("result", "glow");
 
       glow.append("feMerge")
         .html(`
-          <feMergeNode in="blur"></feMergeNode>
+          <feMergeNode in="glow"></feMergeNode>
           <feMergeNode in="SourceGraphic"></feMergeNode>
         `);
+
+      const clipId = "rtpm-clip";
+      defs.append("clipPath")
+        .attr("id", clipId)
+        .append("rect")
+        .attr("x", margin.left)
+        .attr("y", margin.top)
+        .attr("width", innerWidth)
+        .attr("height", innerHeight)
+        .attr("rx", 16);
+
+      function quadrant(d) {
+        const highAdr = d.adr >= adrThreshold;
+        const highRevpar = d.revpar >= revparThreshold;
+
+        if (highAdr && highRevpar) return {
+          label: "Star Inventory",
+          color: "#74d17c",
+          description: "Premium high-performing room type"
+        };
+
+        if (!highAdr && highRevpar) return {
+          label: "Underpriced",
+          color: "#36a9d6",
+          description: "Efficient demand with pricing upside"
+        };
+
+        if (highAdr && !highRevpar) return {
+          label: "Overpriced",
+          color: "#ff9f2f",
+          description: "High ADR but weaker revenue efficiency"
+        };
+
+        return {
+          label: "Weak Inventory",
+          color: "#ef3d2f",
+          description: "Low pricing power and weak revenue efficiency"
+        };
+      }
+
+      const plot = svg.append("g")
+        .attr("clip-path", `url(#${clipId})`);
+
+      plot.append("rect")
+        .attr("x", margin.left)
+        .attr("y", margin.top)
+        .attr("width", x(adrThreshold) - margin.left)
+        .attr("height", y(revparThreshold) - margin.top)
+        .attr("fill", "rgba(54,169,214,0.055)");
+
+      plot.append("rect")
+        .attr("x", x(adrThreshold))
+        .attr("y", margin.top)
+        .attr("width", margin.left + innerWidth - x(adrThreshold))
+        .attr("height", y(revparThreshold) - margin.top)
+        .attr("fill", "rgba(116,209,124,0.055)");
+
+      plot.append("rect")
+        .attr("x", margin.left)
+        .attr("y", y(revparThreshold))
+        .attr("width", x(adrThreshold) - margin.left)
+        .attr("height", margin.top + innerHeight - y(revparThreshold))
+        .attr("fill", "rgba(239,61,47,0.045)");
+
+      plot.append("rect")
+        .attr("x", x(adrThreshold))
+        .attr("y", y(revparThreshold))
+        .attr("width", margin.left + innerWidth - x(adrThreshold))
+        .attr("height", margin.top + innerHeight - y(revparThreshold))
+        .attr("fill", "rgba(255,159,47,0.05)");
 
       const gridX = svg.append("g")
         .attr("transform", `translate(0,${margin.top + innerHeight})`)
@@ -355,37 +444,9 @@ looker.plugins.visualizations.add({
 
       gridY.select("path").remove();
 
-      svg.append("rect")
-        .attr("x", margin.left)
-        .attr("y", margin.top)
-        .attr("width", x(occThreshold) - margin.left)
-        .attr("height", y(adrThreshold) - margin.top)
-        .attr("fill", "rgba(255,159,47,0.045)");
-
-      svg.append("rect")
-        .attr("x", x(occThreshold))
-        .attr("y", margin.top)
-        .attr("width", margin.left + innerWidth - x(occThreshold))
-        .attr("height", y(adrThreshold) - margin.top)
-        .attr("fill", "rgba(116,209,124,0.055)");
-
-      svg.append("rect")
-        .attr("x", margin.left)
-        .attr("y", y(adrThreshold))
-        .attr("width", x(occThreshold) - margin.left)
-        .attr("height", margin.top + innerHeight - y(adrThreshold))
-        .attr("fill", "rgba(239,61,47,0.045)");
-
-      svg.append("rect")
-        .attr("x", x(occThreshold))
-        .attr("y", y(adrThreshold))
-        .attr("width", margin.left + innerWidth - x(occThreshold))
-        .attr("height", margin.top + innerHeight - y(adrThreshold))
-        .attr("fill", "rgba(54,169,214,0.055)");
-
       svg.append("line")
-        .attr("x1", x(occThreshold))
-        .attr("x2", x(occThreshold))
+        .attr("x1", x(adrThreshold))
+        .attr("x2", x(adrThreshold))
         .attr("y1", margin.top)
         .attr("y2", margin.top + innerHeight)
         .attr("stroke", "rgba(255,255,255,0.28)")
@@ -395,8 +456,8 @@ looker.plugins.visualizations.add({
       svg.append("line")
         .attr("x1", margin.left)
         .attr("x2", margin.left + innerWidth)
-        .attr("y1", y(adrThreshold))
-        .attr("y2", y(adrThreshold))
+        .attr("y1", y(revparThreshold))
+        .attr("y2", y(revparThreshold))
         .attr("stroke", "rgba(255,255,255,0.28)")
         .attr("stroke-width", 1)
         .attr("stroke-dasharray", "4 5");
@@ -406,7 +467,7 @@ looker.plugins.visualizations.add({
         .call(
           d3.axisBottom(x)
             .ticks(5)
-            .tickFormat(d => d + "%")
+            .tickFormat(d => formatEuro(d))
         );
 
       xAxis.selectAll("text")
@@ -421,7 +482,7 @@ looker.plugins.visualizations.add({
         .call(
           d3.axisLeft(y)
             .ticks(5)
-            .tickFormat(d => formatADR(d))
+            .tickFormat(d => formatEuro(d))
         );
 
       yAxis.selectAll("text")
@@ -433,47 +494,47 @@ looker.plugins.visualizations.add({
 
       svg.append("text")
         .attr("x", margin.left + innerWidth / 2)
-        .attr("y", height - 4)
+        .attr("y", height - 5)
         .attr("text-anchor", "middle")
-        .text("Occupancy")
-        .style("fill", "rgba(255,255,255,0.52)")
+        .text("ADR Selected Year")
+        .style("fill", "rgba(255,255,255,0.55)")
         .style("font-size", "10px")
         .style("font-weight", 800);
 
       svg.append("text")
         .attr("x", -margin.top - innerHeight / 2)
-        .attr("y", 12)
+        .attr("y", 13)
         .attr("transform", "rotate(-90)")
         .attr("text-anchor", "middle")
-        .text("ADR")
-        .style("fill", "rgba(255,255,255,0.52)")
+        .text("RevPAR Selected Year")
+        .style("fill", "rgba(255,255,255,0.55)")
         .style("font-size", "10px")
         .style("font-weight", 800);
 
       const quadrantLabels = [
         {
-          text: "Overpriced",
-          x: margin.left + 10,
-          y: margin.top + 16,
-          color: "#ff9f2f"
+          text: "Underpriced",
+          x: margin.left + 12,
+          y: margin.top + 18,
+          color: "#36a9d6"
         },
         {
-          text: "Star inventory",
-          x: x(occThreshold) + 10,
-          y: margin.top + 16,
+          text: "Star Inventory",
+          x: x(adrThreshold) + 12,
+          y: margin.top + 18,
           color: "#74d17c"
         },
         {
-          text: "Weak",
-          x: margin.left + 10,
-          y: y(adrThreshold) + 18,
+          text: "Weak Inventory",
+          x: margin.left + 12,
+          y: y(revparThreshold) + 18,
           color: "#ef3d2f"
         },
         {
-          text: "Underpriced",
-          x: x(occThreshold) + 10,
-          y: y(adrThreshold) + 18,
-          color: "#36a9d6"
+          text: "Overpriced",
+          x: x(adrThreshold) + 12,
+          y: y(revparThreshold) + 18,
+          color: "#ff9f2f"
         }
       ];
 
@@ -483,8 +544,8 @@ looker.plugins.visualizations.add({
           .attr("y", q.y)
           .text(q.text)
           .style("fill", q.color)
-          .style("font-size", "10px")
-          .style("font-weight", 900)
+          .style("font-size", width < 600 ? "8px" : "10px")
+          .style("font-weight", 950)
           .style("opacity", 0.72);
       });
 
@@ -494,16 +555,16 @@ looker.plugins.visualizations.add({
         .enter()
         .append("g")
         .attr("class", "rtpm-bubble-group")
-        .attr("transform", d => `translate(${x(d.occupancy)},${y(d.adr)})`)
+        .attr("transform", d => `translate(${x(d.adr)},${y(d.revpar)})`)
         .style("cursor", "pointer");
 
       bubbles.append("circle")
         .attr("r", d => r(d.revenue))
-        .attr("fill", d => quadrant(d).color)
-        .attr("opacity", 0.72)
-        .attr("stroke", "rgba(255,255,255,0.7)")
+        .attr("fill", "url(#rtpm-bubble-gradient)")
+        .attr("opacity", 0.85)
+        .attr("stroke", "rgba(255,255,255,0.76)")
         .attr("stroke-width", 1.2)
-        .attr("filter", "url(#rtpm-glow)");
+        .attr("filter", "url(#rtpm-cyan-glow)");
 
       bubbles.append("text")
         .attr("text-anchor", "middle")
@@ -516,15 +577,16 @@ looker.plugins.visualizations.add({
         })
         .style("fill", "white")
         .style("font-size", width < 600 ? "8px" : "10px")
-        .style("font-weight", 900)
-        .style("pointer-events", "none");
+        .style("font-weight", 950)
+        .style("pointer-events", "none")
+        .style("text-shadow", "0 1px 8px rgba(0,0,0,0.8)");
 
       bubbles
         .on("mousemove", function(event, d) {
           const q = quadrant(d);
 
           bubbles
-            .attr("opacity", b => b.roomType === d.roomType ? 1 : 0.18);
+            .attr("opacity", b => b.roomType === d.roomType ? 1 : 0.16);
 
           d3.select(this)
             .select("circle")
@@ -534,16 +596,15 @@ looker.plugins.visualizations.add({
           const point = d3.pointer(event, chartEl);
 
           tooltipEl.style.opacity = 1;
-          tooltipEl.style.left = Math.min(point[0] + 14, width - 260) + "px";
+          tooltipEl.style.left = Math.min(point[0] + 14, width - 270) + "px";
           tooltipEl.style.top = Math.max(point[1] - 18, 20) + "px";
 
           tooltipEl.innerHTML = `
             <strong>${d.roomType}</strong><br>
-            ADR: <strong>${d.adrRendered || formatADR(d.adr)}</strong><br>
-            Occupancy: <strong>${d.occupancyRendered || formatPct(d.occupancy)}</strong><br>
-            Revenue: <strong>${d.revenueRendered || formatCurrency(d.revenue)}</strong><br>
-            RevPAR: <strong>${d.revparRendered || formatADR(d.revpar)}</strong><br>
-            Booking Share: <strong>${d.bookingShareRendered || formatPct(d.bookingShare)}</strong><br>
+            ADR: <strong>${d.adrRendered || formatEuro(d.adr)}</strong><br>
+            RevPAR: <strong>${d.revparRendered || formatEuro(d.revpar)}</strong><br>
+            Room Revenue: <strong>${d.revenueRendered || formatCurrency(d.revenue)}</strong><br>
+            Bookings: <strong>${d.bookingsRendered || formatNumber(d.bookings)}</strong><br>
             <span style="color:${q.color};">${q.label}</span><br>
             <span style="color:rgba(255,255,255,0.58);">${q.description}</span>
           `;
@@ -552,7 +613,7 @@ looker.plugins.visualizations.add({
           bubbles.attr("opacity", 1);
 
           bubbles.select("circle")
-            .attr("opacity", 0.72)
+            .attr("opacity", 0.85)
             .attr("stroke-width", 1.2);
 
           tooltipEl.style.opacity = 0;
