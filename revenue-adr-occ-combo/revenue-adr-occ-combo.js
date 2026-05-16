@@ -3,31 +3,11 @@ looker.plugins.visualizations.add({
   label: "Revenue ADR Occupancy Combo",
 
   options: {
-    title: {
-      type: "string",
-      label: "Title",
-      default: "Revenue, ADR & Occupancy"
-    },
-    revenue_label: {
-      type: "string",
-      label: "Revenue Label",
-      default: "Revenue"
-    },
-    adr_label: {
-      type: "string",
-      label: "ADR Label",
-      default: "ADR"
-    },
-    occupancy_label: {
-      type: "string",
-      label: "Occupancy Label",
-      default: "Occupancy"
-    },
-    value_prefix: {
-      type: "string",
-      label: "Currency Prefix",
-      default: "€"
-    },
+    title: { type: "string", label: "Title", default: "Revenue, ADR & Occupancy" },
+    revenue_label: { type: "string", label: "Revenue Label", default: "Revenue" },
+    adr_label: { type: "string", label: "ADR Label", default: "ADR" },
+    occupancy_label: { type: "string", label: "Occupancy Label", default: "Occupancy" },
+    value_prefix: { type: "string", label: "Currency Prefix", default: "€" },
     yoy_measure_position: {
       type: "string",
       label: "YoY Measure Position: none / fourth",
@@ -126,11 +106,9 @@ looker.plugins.visualizations.add({
       chartEl.innerHTML = `
         <div class="raoc-empty">
           Add 1 time dimension and 3 measures.<br><br>
-          Dimension: Month / Stay Month<br>
           Measure 1: Revenue<br>
           Measure 2: ADR<br>
-          Measure 3: Occupancy<br>
-          Optional Measure 4: YoY %
+          Measure 3: Occupancy
         </div>
       `;
       done();
@@ -140,10 +118,7 @@ looker.plugins.visualizations.add({
     function loadScript(src) {
       return new Promise((resolve, reject) => {
         const existing = document.querySelector("script[src='" + src + "']");
-        if (existing) {
-          resolve();
-          return;
-        }
+        if (existing) return resolve();
 
         const script = document.createElement("script");
         script.src = src;
@@ -173,44 +148,35 @@ looker.plugins.visualizations.add({
       const revenueField = measures[0].name;
       const adrField = measures[1].name;
       const occField = measures[2].name;
+
       const yoyField =
         config.yoy_measure_position === "fourth" && measures.length >= 4
           ? measures[3].name
           : null;
 
-      const rows = data
-        .map((row, index) => {
-          let label =
-            row[categoryField]?.rendered ||
-            row[categoryField]?.value ||
-            String(index + 1);
+      const rows = data.map((row, index) => {
+        let label =
+          row[categoryField]?.rendered ||
+          row[categoryField]?.value ||
+          String(index + 1);
 
-          label = String(label).replace(/(<([^>]+)>)/gi, "");
+        label = String(label).replace(/(<([^>]+)>)/gi, "");
 
-          let occ = Number(row[occField]?.value || 0);
+        let occ = Number(row[occField]?.value || 0);
+        if (Math.abs(occ) <= 1.2) occ = occ * 100;
 
-          if (Math.abs(occ) <= 1.2) {
-            occ = occ * 100;
-          }
-
-          return {
-            label,
-            revenue: Number(row[revenueField]?.value || 0),
-            adr: Number(row[adrField]?.value || 0),
-            occupancy: occ,
-            yoy: yoyField ? Number(row[yoyField]?.value || 0) : null,
-            revenueRendered: row[revenueField]?.rendered || null,
-            adrRendered: row[adrField]?.rendered || null,
-            occRendered: row[occField]?.rendered || null,
-            yoyRendered: yoyField ? row[yoyField]?.rendered : null
-          };
-        })
-        .filter(row => isFinite(row.revenue) && isFinite(row.adr) && isFinite(row.occupancy));
-
-      if (!rows.length) {
-        chartEl.innerHTML = `<div class="raoc-empty">No valid combo chart data found.</div>`;
-        return;
-      }
+        return {
+          label,
+          revenue: Number(row[revenueField]?.value || 0),
+          adr: Number(row[adrField]?.value || 0),
+          occupancy: occ,
+          yoy: yoyField ? Number(row[yoyField]?.value || 0) : null,
+          revenueRendered: row[revenueField]?.rendered || null,
+          adrRendered: row[adrField]?.rendered || null,
+          occRendered: row[occField]?.rendered || null,
+          yoyRendered: yoyField ? row[yoyField]?.rendered : null
+        };
+      });
 
       const bounds = chartEl.getBoundingClientRect();
       const width = Math.max(bounds.width, 320);
@@ -237,25 +203,70 @@ looker.plugins.visualizations.add({
       function formatCurrency(v) {
         const abs = Math.abs(Number(v || 0));
         const sign = v < 0 ? "-" : "";
-
         if (abs >= 1000000) return sign + prefix + (abs / 1000000).toFixed(1) + "M";
         if (abs >= 1000) return sign + prefix + (abs / 1000).toFixed(0) + "K";
-
-        return sign + prefix + abs.toLocaleString(undefined, {
-          maximumFractionDigits: 0
-        });
+        return sign + prefix + abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
       }
 
       function formatADR(v) {
-        return prefix + Number(v || 0).toLocaleString(undefined, {
-          maximumFractionDigits: 0
-        });
+        return prefix + Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
       }
 
       function formatPct(v) {
         if (!isFinite(v)) return "-";
         if (Math.abs(v) <= 1.2) return (v * 100).toFixed(1) + "%";
         return v.toFixed(1) + "%";
+      }
+
+      function yoyInsight(d) {
+        if (d.yoy === null || !isFinite(d.yoy)) return "";
+        return d.yoy >= 0
+          ? `<br><span style="color:#74d17c;">Performance up ${formatPct(d.yoy)} YoY</span>`
+          : `<br><span style="color:#ef3d2f;">Performance down ${formatPct(d.yoy)} YoY</span>`;
+      }
+
+      function showTooltip(event, d, metricType) {
+        const point = d3.pointer(event, chartEl);
+
+        let color = "#36a9d6";
+        let title = config.revenue_label || "Revenue";
+        let value = formatCurrency(d.revenue);
+        let insight = "Revenue contribution for this period";
+
+        if (metricType === "adr") {
+          color = "#ff9f2f";
+          title = config.adr_label || "ADR";
+          value = d.adrRendered || formatADR(d.adr);
+          insight = "Average Daily Rate performance";
+        }
+
+        if (metricType === "occupancy") {
+          color = "#74d17c";
+          title = config.occupancy_label || "Occupancy";
+          value = d.occRendered || formatPct(d.occupancy);
+          insight = "Occupancy demand strength";
+        }
+
+        if (metricType === "revenue") {
+          value = d.revenueRendered || formatCurrency(d.revenue);
+        }
+
+        tooltipEl.style.opacity = 1;
+        tooltipEl.style.left = Math.min(point[0] + 14, width - 230) + "px";
+        tooltipEl.style.top = Math.max(point[1] - 18, 20) + "px";
+
+        tooltipEl.innerHTML = `
+          <strong>${d.label}</strong><br>
+          <span style="color:${color};">${title}: <strong>${value}</strong></span><br>
+          ${insight}
+          ${yoyInsight(d)}
+        `;
+      }
+
+      function hideTooltip() {
+        tooltipEl.style.opacity = 0;
+        bars.attr("opacity", 0.88);
+        svg.selectAll(".raoc-dot").attr("opacity", 1);
       }
 
       const x = d3
@@ -272,11 +283,9 @@ looker.plugins.visualizations.add({
       const maxAdr = d3.max(rows, d => d.adr) || 1;
       const maxOcc = d3.max(rows, d => d.occupancy) || 100;
 
-      const yRightMax = Math.max(maxAdr, maxOcc) * 1.15;
-
       const yRight = d3
         .scaleLinear()
-        .domain([0, yRightMax])
+        .domain([0, Math.max(maxAdr, maxOcc) * 1.15])
         .range([margin.top + innerHeight, margin.top]);
 
       const defs = svg.append("defs");
@@ -288,79 +297,29 @@ looker.plugins.visualizations.add({
         .attr("y1", "0")
         .attr("y2", "1");
 
-      barGradient.append("stop")
-        .attr("offset", "0%")
-        .attr("stop-color", "#36a9d6")
-        .attr("stop-opacity", 0.95);
-
-      barGradient.append("stop")
-        .attr("offset", "100%")
-        .attr("stop-color", "#36a9d6")
-        .attr("stop-opacity", 0.28);
-
-      const glow = defs.append("filter")
-        .attr("id", "raoc-glow")
-        .attr("x", "-50%")
-        .attr("y", "-50%")
-        .attr("width", "200%")
-        .attr("height", "200%");
-
-      glow.append("feGaussianBlur")
-        .attr("stdDeviation", 3)
-        .attr("result", "blur");
-
-      glow.append("feMerge")
-        .html(`
-          <feMergeNode in="blur"></feMergeNode>
-          <feMergeNode in="SourceGraphic"></feMergeNode>
-        `);
+      barGradient.append("stop").attr("offset", "0%").attr("stop-color", "#36a9d6").attr("stop-opacity", 0.95);
+      barGradient.append("stop").attr("offset", "100%").attr("stop-color", "#36a9d6").attr("stop-opacity", 0.28);
 
       const grid = svg.append("g")
         .attr("transform", `translate(${margin.left},0)`)
-        .call(
-          d3.axisLeft(yRevenue)
-            .ticks(5)
-            .tickSize(-innerWidth)
-            .tickFormat("")
-        );
+        .call(d3.axisLeft(yRevenue).ticks(5).tickSize(-innerWidth).tickFormat(""));
 
-      grid.selectAll("line")
-        .style("stroke", "rgba(255,255,255,0.06)");
-
+      grid.selectAll("line").style("stroke", "rgba(255,255,255,0.06)");
       grid.select("path").remove();
 
       const yAxisLeft = svg.append("g")
         .attr("transform", `translate(${margin.left},0)`)
-        .call(
-          d3.axisLeft(yRevenue)
-            .ticks(5)
-            .tickFormat(d => formatCurrency(d))
-        );
+        .call(d3.axisLeft(yRevenue).ticks(5).tickFormat(d => formatCurrency(d)));
 
-      yAxisLeft.selectAll("text")
-        .style("fill", "rgba(255,255,255,0.62)")
-        .style("font-size", "10px");
-
-      yAxisLeft.selectAll("path,line")
-        .style("stroke", "rgba(255,255,255,0.14)");
+      yAxisLeft.selectAll("text").style("fill", "rgba(255,255,255,0.62)").style("font-size", "10px");
+      yAxisLeft.selectAll("path,line").style("stroke", "rgba(255,255,255,0.14)");
 
       const yAxisRight = svg.append("g")
         .attr("transform", `translate(${margin.left + innerWidth},0)`)
-        .call(
-          d3.axisRight(yRight)
-            .ticks(5)
-            .tickFormat(d => {
-              if (d <= 100) return d + "%";
-              return prefix + d;
-            })
-        );
+        .call(d3.axisRight(yRight).ticks(5).tickFormat(d => d <= 100 ? d + "%" : prefix + d));
 
-      yAxisRight.selectAll("text")
-        .style("fill", "rgba(255,255,255,0.62)")
-        .style("font-size", "10px");
-
-      yAxisRight.selectAll("path,line")
-        .style("stroke", "rgba(255,255,255,0.14)");
+      yAxisRight.selectAll("text").style("fill", "rgba(255,255,255,0.62)").style("font-size", "10px");
+      yAxisRight.selectAll("path,line").style("stroke", "rgba(255,255,255,0.14)");
 
       const xAxis = svg.append("g")
         .attr("transform", `translate(0,${margin.top + innerHeight})`)
@@ -373,8 +332,7 @@ looker.plugins.visualizations.add({
         .attr("transform", width < 600 ? "rotate(-32)" : "rotate(-18)")
         .style("text-anchor", "end");
 
-      xAxis.selectAll("path,line")
-        .style("stroke", "rgba(255,255,255,0.14)");
+      xAxis.selectAll("path,line").style("stroke", "rgba(255,255,255,0.14)");
 
       const bars = svg.append("g")
         .selectAll("rect")
@@ -387,7 +345,13 @@ looker.plugins.visualizations.add({
         .attr("height", d => margin.top + innerHeight - yRevenue(d.revenue))
         .attr("rx", Math.min(8, x.bandwidth() / 3))
         .attr("fill", "url(#raoc-bar-gradient)")
-        .attr("opacity", 0.88);
+        .attr("opacity", 0.88)
+        .style("cursor", "pointer")
+        .on("mousemove", function(event, d) {
+          bars.attr("opacity", b => b.label === d.label ? 1 : 0.35);
+          showTooltip(event, d, "revenue");
+        })
+        .on("mouseleave", hideTooltip);
 
       const lineAdr = d3.line()
         .x(d => x(d.label) + x.bandwidth() / 2)
@@ -407,7 +371,7 @@ looker.plugins.visualizations.add({
         .attr("stroke-width", 3)
         .attr("stroke-linecap", "round")
         .attr("stroke-linejoin", "round")
-        .attr("filter", "url(#raoc-glow)");
+        .attr("pointer-events", "none");
 
       svg.append("path")
         .datum(rows)
@@ -417,34 +381,46 @@ looker.plugins.visualizations.add({
         .attr("stroke-width", 2.4)
         .attr("stroke-linecap", "round")
         .attr("stroke-linejoin", "round")
-        .attr("opacity", 0.82);
+        .attr("opacity", 0.85)
+        .attr("pointer-events", "none");
 
       svg.append("g")
         .selectAll("circle.adr")
         .data(rows)
         .enter()
         .append("circle")
-        .attr("class", "adr")
+        .attr("class", "raoc-dot adr")
         .attr("cx", d => x(d.label) + x.bandwidth() / 2)
         .attr("cy", d => yRight(d.adr))
-        .attr("r", 3.5)
+        .attr("r", 7)
         .attr("fill", "#ff9f2f")
         .attr("stroke", "#030303")
-        .attr("stroke-width", 1.5);
+        .attr("stroke-width", 2)
+        .style("cursor", "pointer")
+        .on("mousemove", function(event, d) {
+          svg.selectAll(".raoc-dot").attr("opacity", dot => dot === d ? 1 : 0.25);
+          showTooltip(event, d, "adr");
+        })
+        .on("mouseleave", hideTooltip);
 
       svg.append("g")
         .selectAll("circle.occ")
         .data(rows)
         .enter()
         .append("circle")
-        .attr("class", "occ")
+        .attr("class", "raoc-dot occ")
         .attr("cx", d => x(d.label) + x.bandwidth() / 2)
         .attr("cy", d => yRight(d.occupancy))
-        .attr("r", 3)
+        .attr("r", 6)
         .attr("fill", "#74d17c")
         .attr("stroke", "#030303")
-        .attr("stroke-width", 1.5)
-        .attr("opacity", 0.9);
+        .attr("stroke-width", 2)
+        .style("cursor", "pointer")
+        .on("mousemove", function(event, d) {
+          svg.selectAll(".raoc-dot").attr("opacity", dot => dot === d ? 1 : 0.25);
+          showTooltip(event, d, "occupancy");
+        })
+        .on("mouseleave", hideTooltip);
 
       const legend = svg.append("g")
         .attr("transform", `translate(${margin.left},${margin.top - 8})`);
@@ -460,9 +436,7 @@ looker.plugins.visualizations.add({
       legendItems.forEach(item => {
         const g = legend.append("g").attr("transform", `translate(${lx},0)`);
 
-        g.append("circle")
-          .attr("r", 5)
-          .attr("fill", item.color);
+        g.append("circle").attr("r", 5).attr("fill", item.color);
 
         g.append("text")
           .attr("x", 10)
@@ -474,87 +448,6 @@ looker.plugins.visualizations.add({
 
         lx += item.label.length * 6 + 42;
       });
-
-      const hoverLine = svg.append("line")
-        .attr("y1", margin.top)
-        .attr("y2", margin.top + innerHeight)
-        .attr("stroke", "rgba(255,255,255,0.22)")
-        .attr("stroke-width", 1)
-        .attr("opacity", 0);
-
-      const overlay = svg.append("g");
-
-      overlay.selectAll("rect")
-        .data(rows)
-        .enter()
-        .append("rect")
-        .attr("x", d => x(d.label))
-        .attr("y", margin.top)
-        .attr("width", x.bandwidth())
-        .attr("height", innerHeight)
-        .attr("fill", "transparent")
-        .style("cursor", "crosshair")
-        .on("mousemove", function(event, d) {
-          const cx = x(d.label) + x.bandwidth() / 2;
-
-          hoverLine
-            .attr("x1", cx)
-            .attr("x2", cx)
-            .attr("opacity", 1);
-
-          bars
-            .attr("opacity", b => b.label === d.label ? 1 : 0.35);
-
-          d3.select(this.parentNode.parentNode)
-            .selectAll("circle")
-            .attr("opacity", c => c.label === d.label ? 1 : 0.35);
-
-          const yoy = d.yoy;
-          const yoyText = yoy === null || !isFinite(yoy)
-            ? "YoY insight unavailable"
-            : yoy >= 0
-              ? `Revenue performance is up ${formatPct(yoy)} YoY`
-              : `Revenue performance is down ${formatPct(yoy)} YoY`;
-
-          const insightColor =
-            yoy === null || !isFinite(yoy)
-              ? "rgba(255,255,255,0.6)"
-              : yoy >= 0
-                ? "#74d17c"
-                : "#ef3d2f";
-
-          tooltipEl.style.opacity = 1;
-          tooltipEl.style.left = Math.min(cx + 16, width - 230) + "px";
-          tooltipEl.style.top = Math.max(yRevenue(d.revenue) - 20, 20) + "px";
-
-          tooltipEl.innerHTML = `
-            <strong>${d.label}</strong><br>
-            ${config.revenue_label || "Revenue"}: <strong>${d.revenueRendered || formatCurrency(d.revenue)}</strong><br>
-            ${config.adr_label || "ADR"}: <strong>${d.adrRendered || formatADR(d.adr)}</strong><br>
-            ${config.occupancy_label || "Occupancy"}: <strong>${d.occRendered || formatPct(d.occupancy)}</strong><br>
-            <span style="color:${insightColor};">${yoyText}</span>
-          `;
-        })
-        .on("mouseleave", function() {
-          hoverLine.attr("opacity", 0);
-          bars.attr("opacity", 0.88);
-
-          svg.selectAll("circle")
-            .attr("opacity", 1);
-
-          svg.selectAll("circle.occ")
-            .attr("opacity", 0.9);
-
-          tooltipEl.style.opacity = 0;
-        });
-
-      function formatPct(v) {
-        if (!isFinite(v)) return "-";
-        if (Math.abs(v) <= 1.2) {
-          return (v * 100).toFixed(1) + "%";
-        }
-        return v.toFixed(1) + "%";
-      }
     }
   }
 });
