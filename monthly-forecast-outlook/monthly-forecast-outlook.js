@@ -258,6 +258,7 @@ looker.plugins.visualizations.add({
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
+
     const titleEl = element.querySelector(".mfo-title");
     const subtitleEl = element.querySelector(".mfo-subtitle");
     const tableWrapEl = element.querySelector(".mfo-table-wrap");
@@ -268,21 +269,48 @@ looker.plugins.visualizations.add({
     const dimensions = queryResponse.fields.dimension_like || [];
     const measures = queryResponse.fields.measure_like || [];
 
-    if (!data || data.length === 0 || dimensions.length < 1 || measures.length < 10) {
+    function findField(fields, keywords) {
+      return fields.find(field => {
+        const name = String(field.name || "").toLowerCase();
+        const label = String(field.label || field.label_short || "").toLowerCase();
+
+        return keywords.some(k =>
+          name.includes(k) || label.includes(k)
+        );
+      });
+    }
+
+    const currentOtbRevenueField = findField(measures, ["current otb revenue", "otb revenue", "current revenue"])?.name;
+    const stlyOtbRevenueField = findField(measures, ["stly otb revenue", "same time last year", "stly revenue"])?.name;
+    const forecastRevenueField = findField(measures, ["forecast revenue", "projected revenue"])?.name;
+    const forecastPctField = findField(measures, ["forecast vs ly", "forecast %", "variance %", "vs ly %"])?.name;
+
+    const availableRnField = findField(measures, ["available room nights", "available rn"])?.name;
+    const currentOtbRnField = findField(measures, ["current otb room nights", "current otb rn"])?.name;
+    const stlyOtbRnField = findField(measures, ["stly otb room nights", "stly otb rn"])?.name;
+
+    const currentOtbAdrField = findField(measures, ["current otb adr", "otb adr", "current adr"])?.name;
+    const expectedAdditionalAdrField = findField(measures, ["expected additional adr", "additional adr"])?.name;
+    const forecastOccField = findField(measures, ["forecast occupancy", "forecast occ"])?.name;
+
+    if (
+      !data || data.length === 0 ||
+      dimensions.length < 1 ||
+      !currentOtbRevenueField ||
+      !stlyOtbRevenueField ||
+      !forecastRevenueField ||
+      !forecastPctField ||
+      !availableRnField ||
+      !currentOtbRnField ||
+      !stlyOtbRnField ||
+      !currentOtbAdrField ||
+      !expectedAdditionalAdrField ||
+      !forecastOccField
+    ) {
       tableWrapEl.innerHTML = `
         <div class="mfo-empty">
-          Add 1 month dimension and 10 measures.<br><br>
-          Dimension: Month<br>
-          Measure 1: Current OTB Revenue<br>
-          Measure 2: STLY OTB Revenue<br>
-          Measure 3: Forecast Revenue<br>
-          Measure 4: Forecast vs LY %<br>
-          Measure 5: Available Room Nights<br>
-          Measure 6: Current OTB Room Nights<br>
-          Measure 7: STLY OTB Room Nights<br>
-          Measure 8: Current OTB ADR<br>
-          Measure 9: Expected Additional ADR<br>
-          Measure 10: Forecast Occupancy
+          Missing required fields.<br><br>
+          Add the required measures in any order.
         </div>
       `;
       done();
@@ -290,18 +318,6 @@ looker.plugins.visualizations.add({
     }
 
     const monthField = dimensions[0].name;
-
-    const currentOtbRevenueField = measures[0].name;
-    const stlyOtbRevenueField = measures[1].name;
-    const forecastRevenueField = measures[2].name;
-    const forecastPctField = measures[3].name;
-    const availableRnField = measures[4].name;
-    const currentOtbRnField = measures[5].name;
-    const stlyOtbRnField = measures[6].name;
-    const currentOtbAdrField = measures[7].name;
-    const expectedAdditionalAdrField = measures[8].name;
-    const forecastOccField = measures[9].name;
-
     const prefix = config.value_prefix || "€";
 
     function clean(value) {
@@ -328,39 +344,26 @@ looker.plugins.visualizations.add({
         dec: 12, december: 12
       };
 
-      if (map[m]) return map[m];
-
-      const num = Number(m);
-      if (num >= 1 && num <= 12) return num;
-
-      return 99;
+      return map[m] || 99;
     }
 
-    function formatCurrency(v, rendered) {
-      if (rendered) return clean(rendered);
-
+    function formatCurrency(v) {
       const abs = Math.abs(Number(v || 0));
       const sign = v < 0 ? "-" : "";
 
       if (abs >= 1000000) return sign + prefix + (abs / 1000000).toFixed(1) + "M";
       if (abs >= 1000) return sign + prefix + (abs / 1000).toFixed(0) + "K";
 
-      return sign + prefix + abs.toLocaleString(undefined, {
-        maximumFractionDigits: 0
-      });
+      return sign + prefix + abs.toLocaleString();
     }
 
-    function formatEuro(v, rendered) {
-      if (rendered) return clean(rendered);
-
+    function formatEuro(v) {
       return prefix + Number(v || 0).toLocaleString(undefined, {
         maximumFractionDigits: 0
       });
     }
 
-    function formatNumber(v, rendered) {
-      if (rendered) return clean(rendered);
-
+    function formatNumber(v) {
       return Number(v || 0).toLocaleString(undefined, {
         maximumFractionDigits: 0
       });
@@ -368,95 +371,85 @@ looker.plugins.visualizations.add({
 
     function pctNumber(v) {
       let num = Number(v || 0);
-      if (Math.abs(num) <= 1.2) num = num * 100;
+      if (Math.abs(num) <= 1.2) num *= 100;
       return num;
     }
 
-    function formatPct(v, rendered, arrow) {
-      if (rendered && !arrow) return clean(rendered);
-
+    function formatPct(v, arrow = false) {
       const num = pctNumber(v);
 
-      if (rendered && arrow) {
-        const sign = num > 0 ? "▲ " : num < 0 ? "▼ " : "• ";
-        return sign + clean(rendered).replace(/^[-+▲▼• ]+/, "");
-      }
-
-      const prefixArrow = arrow
+      const icon = arrow
         ? num > 0 ? "▲ " : num < 0 ? "▼ " : "• "
         : "";
 
-      return prefixArrow + Math.abs(num).toFixed(1) + "%";
+      return icon + Math.abs(num).toFixed(1) + "%";
     }
 
     function occClass(value) {
       const occ = pctNumber(value);
+
       if (occ >= 85) return "mfo-occ-high";
       if (occ >= 65) return "mfo-occ-mid";
+
       return "mfo-occ-low";
     }
 
     function varianceClass(value) {
-      return pctNumber(value) >= 0 ? "mfo-positive" : "mfo-negative";
+      return pctNumber(value) >= 0
+        ? "mfo-positive"
+        : "mfo-negative";
     }
 
-    const rows = data
-      .map(row => {
-        const month =
-          clean(row[monthField]?.rendered) ||
-          clean(row[monthField]?.value) ||
-          "Unknown";
+    const rows = data.map(row => {
 
-        return {
-          month,
-          rank: monthRank(month),
+      const month =
+        clean(row[monthField]?.rendered) ||
+        clean(row[monthField]?.value) ||
+        "Unknown";
 
-          currentOtbRevenue: Number(row[currentOtbRevenueField]?.value || 0),
-          stlyOtbRevenue: Number(row[stlyOtbRevenueField]?.value || 0),
-          forecastRevenue: Number(row[forecastRevenueField]?.value || 0),
-          forecastPct: pctNumber(row[forecastPctField]?.value || 0),
-          availableRn: Number(row[availableRnField]?.value || 0),
-          currentOtbRn: Number(row[currentOtbRnField]?.value || 0),
-          stlyOtbRn: Number(row[stlyOtbRnField]?.value || 0),
-          currentOtbAdr: Number(row[currentOtbAdrField]?.value || 0),
-          expectedAdditionalAdr: Number(row[expectedAdditionalAdrField]?.value || 0),
-          forecastOcc: pctNumber(row[forecastOccField]?.value || 0),
+      return {
+        month,
+        rank: monthRank(month),
 
-          currentOtbRevenueRendered: row[currentOtbRevenueField]?.rendered || null,
-          stlyOtbRevenueRendered: row[stlyOtbRevenueField]?.rendered || null,
-          forecastRevenueRendered: row[forecastRevenueField]?.rendered || null,
-          forecastPctRendered: row[forecastPctField]?.rendered || null,
-          availableRnRendered: row[availableRnField]?.rendered || null,
-          currentOtbRnRendered: row[currentOtbRnField]?.rendered || null,
-          stlyOtbRnRendered: row[stlyOtbRnField]?.rendered || null,
-          currentOtbAdrRendered: row[currentOtbAdrField]?.rendered || null,
-          expectedAdditionalAdrRendered: row[expectedAdditionalAdrField]?.rendered || null,
-          forecastOccRendered: row[forecastOccField]?.rendered || null
-        };
-      })
-      .filter(row => row.month)
-      .sort((a, b) => a.rank - b.rank);
+        currentOtbRevenue: Number(row[currentOtbRevenueField]?.value || 0),
+        stlyOtbRevenue: Number(row[stlyOtbRevenueField]?.value || 0),
+        forecastRevenue: Number(row[forecastRevenueField]?.value || 0),
+        forecastPct: Number(row[forecastPctField]?.value || 0),
+
+        availableRn: Number(row[availableRnField]?.value || 0),
+        currentOtbRn: Number(row[currentOtbRnField]?.value || 0),
+        stlyOtbRn: Number(row[stlyOtbRnField]?.value || 0),
+
+        currentOtbAdr: Number(row[currentOtbAdrField]?.value || 0),
+        expectedAdditionalAdr: Number(row[expectedAdditionalAdrField]?.value || 0),
+
+        forecastOcc: Number(row[forecastOccField]?.value || 0)
+      };
+
+    }).sort((a, b) => a.rank - b.rank);
 
     let sortKey = "rank";
     let sortDirection = 1;
 
     function renderTable() {
+
       const sortedRows = [...rows].sort((a, b) => {
-        if (sortKey === "rank") return (a.rank - b.rank) * sortDirection;
 
-        const av = a[sortKey];
-        const bv = b[sortKey];
+        if (sortKey === "rank") {
+          return (a.rank - b.rank) * sortDirection;
+        }
 
-        if (typeof av === "string") return av.localeCompare(bv) * sortDirection;
-
-        return (Number(av || 0) - Number(bv || 0)) * sortDirection;
+        return (
+          (Number(a[sortKey] || 0) - Number(b[sortKey] || 0))
+        ) * sortDirection;
       });
 
-      const maxForecast = Math.max(...rows.map(r => r.forecastRevenue), 0);
+      const maxForecast = Math.max(...rows.map(r => r.forecastRevenue));
 
       tableWrapEl.innerHTML = `
         <div class="mfo-scroll">
           <table class="mfo-table">
+
             <thead>
               <tr>
                 <th data-sort="rank">Month</th>
@@ -474,10 +467,17 @@ looker.plugins.visualizations.add({
             </thead>
 
             <tbody>
+
               ${sortedRows.map(row => {
-                const isBest = row.forecastRevenue === maxForecast && maxForecast > 0;
-                const isCompression = row.forecastOcc >= 85;
-                const isWeak = row.forecastOcc < 55;
+
+                const isBest =
+                  row.forecastRevenue === maxForecast;
+
+                const isCompression =
+                  pctNumber(row.forecastOcc) >= 85;
+
+                const isWeak =
+                  pctNumber(row.forecastOcc) < 55;
 
                 const rowClass = [
                   isBest ? "mfo-best" : "",
@@ -487,59 +487,67 @@ looker.plugins.visualizations.add({
 
                 return `
                   <tr class="${rowClass}">
-                    <td class="mfo-month">${row.month}</td>
+
+                    <td class="mfo-month">
+                      ${row.month}
+                    </td>
 
                     <td class="mfo-current">
-                      ${formatCurrency(row.currentOtbRevenue, row.currentOtbRevenueRendered)}
+                      ${formatCurrency(row.currentOtbRevenue)}
                     </td>
 
                     <td class="mfo-stly">
-                      ${formatCurrency(row.stlyOtbRevenue, row.stlyOtbRevenueRendered)}
+                      ${formatCurrency(row.stlyOtbRevenue)}
                     </td>
 
                     <td class="mfo-forecast">
-                      ${formatCurrency(row.forecastRevenue, row.forecastRevenueRendered)}
+                      ${formatCurrency(row.forecastRevenue)}
                     </td>
 
                     <td class="${varianceClass(row.forecastPct)}">
-                      ${formatPct(row.forecastPct, row.forecastPctRendered, true)}
+                      ${formatPct(row.forecastPct, true)}
                     </td>
 
                     <td class="mfo-neutral">
-                      ${formatNumber(row.availableRn, row.availableRnRendered)}
+                      ${formatNumber(row.availableRn)}
                     </td>
 
                     <td class="mfo-current">
-                      ${formatNumber(row.currentOtbRn, row.currentOtbRnRendered)}
+                      ${formatNumber(row.currentOtbRn)}
                     </td>
 
                     <td class="mfo-stly">
-                      ${formatNumber(row.stlyOtbRn, row.stlyOtbRnRendered)}
+                      ${formatNumber(row.stlyOtbRn)}
                     </td>
 
                     <td class="mfo-current">
-                      ${formatEuro(row.currentOtbAdr, row.currentOtbAdrRendered)}
+                      ${formatEuro(row.currentOtbAdr)}
                     </td>
 
                     <td class="mfo-positive">
-                      ${formatEuro(row.expectedAdditionalAdr, row.expectedAdditionalAdrRendered)}
+                      ${formatEuro(row.expectedAdditionalAdr)}
                     </td>
 
                     <td>
                       <span class="mfo-occ-pill ${occClass(row.forecastOcc)}">
-                        ${formatPct(row.forecastOcc, row.forecastOccRendered, false)}
+                        ${formatPct(row.forecastOcc)}
                       </span>
                     </td>
+
                   </tr>
                 `;
+
               }).join("")}
+
             </tbody>
           </table>
         </div>
       `;
 
       tableWrapEl.querySelectorAll("th[data-sort]").forEach(th => {
+
         th.addEventListener("click", () => {
+
           const key = th.getAttribute("data-sort");
 
           if (sortKey === key) {
