@@ -244,6 +244,7 @@ looker.plugins.visualizations.add({
           color: white;
           padding: 18px;
           font-size: 12px;
+          line-height: 1.55;
         }
       </style>
 
@@ -258,7 +259,6 @@ looker.plugins.visualizations.add({
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
-
     const titleEl = element.querySelector(".mfo-title");
     const subtitleEl = element.querySelector(".mfo-subtitle");
     const tableWrapEl = element.querySelector(".mfo-table-wrap");
@@ -269,29 +269,93 @@ looker.plugins.visualizations.add({
     const dimensions = queryResponse.fields.dimension_like || [];
     const measures = queryResponse.fields.measure_like || [];
 
+    function normalizeText(value) {
+      return String(value || "")
+        .toLowerCase()
+        .replace(/[_\-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
     function findField(fields, keywords) {
       return fields.find(field => {
-        const name = String(field.name || "").toLowerCase();
-        const label = String(field.label || field.label_short || "").toLowerCase();
+        const name = normalizeText(field.name);
+        const label = normalizeText(field.label);
+        const labelShort = normalizeText(field.label_short);
+        const viewLabel = normalizeText(field.view_label);
 
-        return keywords.some(k =>
-          name.includes(k) || label.includes(k)
-        );
+        const haystack = `${name} ${label} ${labelShort} ${viewLabel}`;
+
+        return keywords.some(keyword => haystack.includes(normalizeText(keyword)));
       });
     }
 
-    const currentOtbRevenueField = findField(measures, ["current otb revenue", "otb revenue", "current revenue"])?.name;
-    const stlyOtbRevenueField = findField(measures, ["stly otb revenue", "same time last year", "stly revenue"])?.name;
-    const forecastRevenueField = findField(measures, ["forecast revenue", "projected revenue"])?.name;
-    const forecastPctField = findField(measures, ["forecast vs ly", "forecast %", "variance %", "vs ly %"])?.name;
+    const currentOtbRevenueField = findField(measures, [
+      "otb room revenue selected year",
+      "current otb revenue",
+      "otb revenue selected year",
+      "room revenue selected year",
+      "current revenue"
+    ])?.name;
 
-    const availableRnField = findField(measures, ["available room nights", "available rn"])?.name;
-    const currentOtbRnField = findField(measures, ["current otb room nights", "current otb rn"])?.name;
-    const stlyOtbRnField = findField(measures, ["stly otb room nights", "stly otb rn"])?.name;
+    const stlyOtbRevenueField = findField(measures, [
+      "otb room revenue stly",
+      "stly otb revenue",
+      "otb revenue stly",
+      "same time last year",
+      "stly revenue"
+    ])?.name;
 
-    const currentOtbAdrField = findField(measures, ["current otb adr", "otb adr", "current adr"])?.name;
-    const expectedAdditionalAdrField = findField(measures, ["expected additional adr", "additional adr"])?.name;
-    const forecastOccField = findField(measures, ["forecast occupancy", "forecast occ"])?.name;
+    const forecastRevenueField = findField(measures, [
+      "forecast projection",
+      "forecast revenue",
+      "projected revenue"
+    ])?.name;
+
+    const forecastPctField = findField(measures, [
+      "forecast vs ly",
+      "forecast % ly",
+      "forecast percent ly",
+      "forecast percentage ly",
+      "forecast variance",
+      "variance %",
+      "vs ly %"
+    ])?.name;
+
+    const availableRnField = findField(measures, [
+      "available room nights otb selected year",
+      "available room nights",
+      "available rn"
+    ])?.name;
+
+    const currentOtbRnField = findField(measures, [
+      "otb room nights selected year",
+      "current otb room nights",
+      "current otb rn"
+    ])?.name;
+
+    const stlyOtbRnField = findField(measures, [
+      "otb room nights stly",
+      "stly otb room nights",
+      "stly otb rn"
+    ])?.name;
+
+    const currentOtbAdrField = findField(measures, [
+      "otb adr selected year",
+      "current otb adr",
+      "otb adr",
+      "current adr"
+    ])?.name;
+
+    const expectedAdditionalAdrField = findField(measures, [
+      "expected additional adr",
+      "additional adr"
+    ])?.name;
+
+    const forecastOccField = findField(measures, [
+      "forecast occupancy",
+      "forecast occ"
+    ])?.name;
 
     if (
       !data || data.length === 0 ||
@@ -310,7 +374,17 @@ looker.plugins.visualizations.add({
       tableWrapEl.innerHTML = `
         <div class="mfo-empty">
           Missing required fields.<br><br>
-          Add the required measures in any order.
+          Required fields can be in any order, but names/labels must match these meanings:<br><br>
+          • Current OTB Revenue<br>
+          • STLY OTB Revenue<br>
+          • Forecast Projection / Forecast Revenue<br>
+          • Forecast vs LY %<br>
+          • Available Room Nights<br>
+          • Current OTB Room Nights<br>
+          • STLY OTB Room Nights<br>
+          • Current OTB ADR<br>
+          • Expected Additional ADR<br>
+          • Forecast Occupancy
         </div>
       `;
       done();
@@ -344,26 +418,42 @@ looker.plugins.visualizations.add({
         dec: 12, december: 12
       };
 
-      return map[m] || 99;
+      if (map[m]) return map[m];
+
+      const num = Number(m);
+      if (num >= 1 && num <= 12) return num;
+
+      const match = m.match(/(\d{4})[-/](\d{1,2})/);
+      if (match) return Number(match[2]);
+
+      return 99;
     }
 
-    function formatCurrency(v) {
+    function formatCurrency(v, rendered) {
+      if (rendered) return clean(rendered);
+
       const abs = Math.abs(Number(v || 0));
       const sign = v < 0 ? "-" : "";
 
       if (abs >= 1000000) return sign + prefix + (abs / 1000000).toFixed(1) + "M";
       if (abs >= 1000) return sign + prefix + (abs / 1000).toFixed(0) + "K";
 
-      return sign + prefix + abs.toLocaleString();
+      return sign + prefix + abs.toLocaleString(undefined, {
+        maximumFractionDigits: 0
+      });
     }
 
-    function formatEuro(v) {
+    function formatEuro(v, rendered) {
+      if (rendered) return clean(rendered);
+
       return prefix + Number(v || 0).toLocaleString(undefined, {
         maximumFractionDigits: 0
       });
     }
 
-    function formatNumber(v) {
+    function formatNumber(v, rendered) {
+      if (rendered) return clean(rendered);
+
       return Number(v || 0).toLocaleString(undefined, {
         maximumFractionDigits: 0
       });
@@ -371,12 +461,21 @@ looker.plugins.visualizations.add({
 
     function pctNumber(v) {
       let num = Number(v || 0);
-      if (Math.abs(num) <= 1.2) num *= 100;
+      if (Math.abs(num) <= 1.2) num = num * 100;
       return num;
     }
 
-    function formatPct(v, arrow = false) {
+    function formatPct(v, rendered, arrow) {
       const num = pctNumber(v);
+
+      if (rendered && !arrow) {
+        return clean(rendered);
+      }
+
+      if (rendered && arrow) {
+        const icon = num > 0 ? "▲ " : num < 0 ? "▼ " : "• ";
+        return icon + clean(rendered).replace(/^[-+▲▼• ]+/, "");
+      }
 
       const icon = arrow
         ? num > 0 ? "▲ " : num < 0 ? "▼ " : "• "
@@ -390,66 +489,73 @@ looker.plugins.visualizations.add({
 
       if (occ >= 85) return "mfo-occ-high";
       if (occ >= 65) return "mfo-occ-mid";
-
       return "mfo-occ-low";
     }
 
     function varianceClass(value) {
-      return pctNumber(value) >= 0
-        ? "mfo-positive"
-        : "mfo-negative";
+      return pctNumber(value) >= 0 ? "mfo-positive" : "mfo-negative";
     }
 
-    const rows = data.map(row => {
+    const rows = data
+      .map(row => {
+        const month =
+          clean(row[monthField]?.rendered) ||
+          clean(row[monthField]?.value) ||
+          "Unknown";
 
-      const month =
-        clean(row[monthField]?.rendered) ||
-        clean(row[monthField]?.value) ||
-        "Unknown";
+        return {
+          month,
+          rank: monthRank(month),
 
-      return {
-        month,
-        rank: monthRank(month),
+          currentOtbRevenue: Number(row[currentOtbRevenueField]?.value || 0),
+          stlyOtbRevenue: Number(row[stlyOtbRevenueField]?.value || 0),
+          forecastRevenue: Number(row[forecastRevenueField]?.value || 0),
+          forecastPct: Number(row[forecastPctField]?.value || 0),
 
-        currentOtbRevenue: Number(row[currentOtbRevenueField]?.value || 0),
-        stlyOtbRevenue: Number(row[stlyOtbRevenueField]?.value || 0),
-        forecastRevenue: Number(row[forecastRevenueField]?.value || 0),
-        forecastPct: Number(row[forecastPctField]?.value || 0),
+          availableRn: Number(row[availableRnField]?.value || 0),
+          currentOtbRn: Number(row[currentOtbRnField]?.value || 0),
+          stlyOtbRn: Number(row[stlyOtbRnField]?.value || 0),
 
-        availableRn: Number(row[availableRnField]?.value || 0),
-        currentOtbRn: Number(row[currentOtbRnField]?.value || 0),
-        stlyOtbRn: Number(row[stlyOtbRnField]?.value || 0),
+          currentOtbAdr: Number(row[currentOtbAdrField]?.value || 0),
+          expectedAdditionalAdr: Number(row[expectedAdditionalAdrField]?.value || 0),
+          forecastOcc: Number(row[forecastOccField]?.value || 0),
 
-        currentOtbAdr: Number(row[currentOtbAdrField]?.value || 0),
-        expectedAdditionalAdr: Number(row[expectedAdditionalAdrField]?.value || 0),
+          currentOtbRevenueRendered: row[currentOtbRevenueField]?.rendered || null,
+          stlyOtbRevenueRendered: row[stlyOtbRevenueField]?.rendered || null,
+          forecastRevenueRendered: row[forecastRevenueField]?.rendered || null,
+          forecastPctRendered: row[forecastPctField]?.rendered || null,
 
-        forecastOcc: Number(row[forecastOccField]?.value || 0)
-      };
+          availableRnRendered: row[availableRnField]?.rendered || null,
+          currentOtbRnRendered: row[currentOtbRnField]?.rendered || null,
+          stlyOtbRnRendered: row[stlyOtbRnField]?.rendered || null,
 
-    }).sort((a, b) => a.rank - b.rank);
+          currentOtbAdrRendered: row[currentOtbAdrField]?.rendered || null,
+          expectedAdditionalAdrRendered: row[expectedAdditionalAdrField]?.rendered || null,
+          forecastOccRendered: row[forecastOccField]?.rendered || null
+        };
+      })
+      .sort((a, b) => a.rank - b.rank);
 
     let sortKey = "rank";
     let sortDirection = 1;
 
     function renderTable() {
-
       const sortedRows = [...rows].sort((a, b) => {
-
         if (sortKey === "rank") {
           return (a.rank - b.rank) * sortDirection;
         }
 
         return (
-          (Number(a[sortKey] || 0) - Number(b[sortKey] || 0))
+          Number(a[sortKey] || 0) -
+          Number(b[sortKey] || 0)
         ) * sortDirection;
       });
 
-      const maxForecast = Math.max(...rows.map(r => r.forecastRevenue));
+      const maxForecast = Math.max(...rows.map(r => r.forecastRevenue), 0);
 
       tableWrapEl.innerHTML = `
         <div class="mfo-scroll">
           <table class="mfo-table">
-
             <thead>
               <tr>
                 <th data-sort="rank">Month</th>
@@ -467,17 +573,10 @@ looker.plugins.visualizations.add({
             </thead>
 
             <tbody>
-
               ${sortedRows.map(row => {
-
-                const isBest =
-                  row.forecastRevenue === maxForecast;
-
-                const isCompression =
-                  pctNumber(row.forecastOcc) >= 85;
-
-                const isWeak =
-                  pctNumber(row.forecastOcc) < 55;
+                const isBest = row.forecastRevenue === maxForecast && maxForecast > 0;
+                const isCompression = pctNumber(row.forecastOcc) >= 85;
+                const isWeak = pctNumber(row.forecastOcc) < 55;
 
                 const rowClass = [
                   isBest ? "mfo-best" : "",
@@ -487,67 +586,59 @@ looker.plugins.visualizations.add({
 
                 return `
                   <tr class="${rowClass}">
-
-                    <td class="mfo-month">
-                      ${row.month}
-                    </td>
+                    <td class="mfo-month">${row.month}</td>
 
                     <td class="mfo-current">
-                      ${formatCurrency(row.currentOtbRevenue)}
+                      ${formatCurrency(row.currentOtbRevenue, row.currentOtbRevenueRendered)}
                     </td>
 
                     <td class="mfo-stly">
-                      ${formatCurrency(row.stlyOtbRevenue)}
+                      ${formatCurrency(row.stlyOtbRevenue, row.stlyOtbRevenueRendered)}
                     </td>
 
                     <td class="mfo-forecast">
-                      ${formatCurrency(row.forecastRevenue)}
+                      ${formatCurrency(row.forecastRevenue, row.forecastRevenueRendered)}
                     </td>
 
                     <td class="${varianceClass(row.forecastPct)}">
-                      ${formatPct(row.forecastPct, true)}
+                      ${formatPct(row.forecastPct, row.forecastPctRendered, true)}
                     </td>
 
                     <td class="mfo-neutral">
-                      ${formatNumber(row.availableRn)}
+                      ${formatNumber(row.availableRn, row.availableRnRendered)}
                     </td>
 
                     <td class="mfo-current">
-                      ${formatNumber(row.currentOtbRn)}
+                      ${formatNumber(row.currentOtbRn, row.currentOtbRnRendered)}
                     </td>
 
                     <td class="mfo-stly">
-                      ${formatNumber(row.stlyOtbRn)}
+                      ${formatNumber(row.stlyOtbRn, row.stlyOtbRnRendered)}
                     </td>
 
                     <td class="mfo-current">
-                      ${formatEuro(row.currentOtbAdr)}
+                      ${formatEuro(row.currentOtbAdr, row.currentOtbAdrRendered)}
                     </td>
 
                     <td class="mfo-positive">
-                      ${formatEuro(row.expectedAdditionalAdr)}
+                      ${formatEuro(row.expectedAdditionalAdr, row.expectedAdditionalAdrRendered)}
                     </td>
 
                     <td>
                       <span class="mfo-occ-pill ${occClass(row.forecastOcc)}">
-                        ${formatPct(row.forecastOcc)}
+                        ${formatPct(row.forecastOcc, row.forecastOccRendered, false)}
                       </span>
                     </td>
-
                   </tr>
                 `;
-
               }).join("")}
-
             </tbody>
           </table>
         </div>
       `;
 
       tableWrapEl.querySelectorAll("th[data-sort]").forEach(th => {
-
         th.addEventListener("click", () => {
-
           const key = th.getAttribute("data-sort");
 
           if (sortKey === key) {
