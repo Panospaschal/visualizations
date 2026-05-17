@@ -213,3 +213,374 @@ looker.plugins.visualizations.add({
           0%,100% { box-shadow: inset 3px 0 0 rgba(116,209,124,0.35); }
           50% { box-shadow: inset 3px 0 0 rgba(116,209,124,0.85); }
         }
+
+        .psim-empty {
+          color: white;
+          padding: 18px;
+          font-size: 12px;
+          line-height: 1.55;
+        }
+      </style>
+
+      <div class="psim-wrap">
+        <div class="psim-header">
+          <div class="psim-title"></div>
+          <div class="psim-subtitle"></div>
+        </div>
+        <div class="psim-table-wrap"></div>
+      </div>
+    `;
+  },
+
+  updateAsync: function(data, element, config, queryResponse, details, done) {
+    const titleEl = element.querySelector(".psim-title");
+    const subtitleEl = element.querySelector(".psim-subtitle");
+    const tableWrapEl = element.querySelector(".psim-table-wrap");
+
+    titleEl.innerText = config.title || "Pace vs STLY Intelligence Matrix";
+    subtitleEl.innerText = config.subtitle || "Forward-looking pacing analysis versus same time last year";
+
+    const dimensions = queryResponse.fields.dimension_like || [];
+    const measures = queryResponse.fields.measure_like || [];
+
+    function normalizeText(value) {
+      return String(value || "")
+        .toLowerCase()
+        .replace(/[_\\-]+/g, " ")
+        .replace(/\\s+/g, " ")
+        .trim();
+    }
+
+    function clean(value) {
+      return String(value || "")
+        .replace(/(<([^>]+)>)/gi, "")
+        .trim();
+    }
+
+    function findField(fields, keywords) {
+      return fields.find(field => {
+        const haystack = `
+          ${normalizeText(field.name)}
+          ${normalizeText(field.label)}
+          ${normalizeText(field.label_short)}
+          ${normalizeText(field.view_label)}
+        `;
+
+        return keywords.some(keyword =>
+          haystack.includes(normalizeText(keyword))
+        );
+      });
+    }
+
+    const revenuePaceField = findField(measures, [
+      "revenue pace",
+      "revenue pace %",
+      "room revenue pace",
+      "pace revenue",
+      "revenue vs stly",
+      "revenue stly %"
+    ])?.name;
+
+    const roomNightsPaceField = findField(measures, [
+      "room nights pace",
+      "room nights pace %",
+      "rn pace",
+      "nights pace",
+      "room nights vs stly",
+      "occupied room nights pace"
+    ])?.name;
+
+    const adrPaceField = findField(measures, [
+      "adr pace",
+      "adr pace %",
+      "adr vs stly",
+      "adr stly %"
+    ])?.name;
+
+    const currentOtbOccField = findField(measures, [
+      "current otb occupancy",
+      "otb occupancy",
+      "current occupancy",
+      "otb occupancy selected year"
+    ])?.name;
+
+    if (
+      !data ||
+      data.length === 0 ||
+      dimensions.length < 1 ||
+      !revenuePaceField ||
+      !roomNightsPaceField ||
+      !adrPaceField ||
+      !currentOtbOccField
+    ) {
+      tableWrapEl.innerHTML = `
+        <div class="psim-empty">
+          Missing required fields.<br><br>
+          Dimension:<br>
+          • Month<br><br>
+          Measures, any order:<br>
+          • Revenue Pace %<br>
+          • Room Nights Pace %<br>
+          • ADR Pace %<br>
+          • Current OTB Occupancy
+        </div>
+      `;
+      done();
+      return;
+    }
+
+    const monthField = dimensions[0].name;
+
+    function monthRank(value) {
+      const m = clean(value).toLowerCase();
+
+      const map = {
+        jan: 1, january: 1,
+        feb: 2, february: 2,
+        mar: 3, march: 3,
+        apr: 4, april: 4,
+        may: 5,
+        jun: 6, june: 6,
+        jul: 7, july: 7,
+        aug: 8, august: 8,
+        sep: 9, sept: 9, september: 9,
+        oct: 10, october: 10,
+        nov: 11, november: 11,
+        dec: 12, december: 12
+      };
+
+      if (map[m]) return map[m];
+
+      const num = Number(m);
+      if (num >= 1 && num <= 12) return num;
+
+      const match = m.match(/(\\d{4})[-/](\\d{1,2})/);
+      if (match) return Number(match[2]);
+
+      return 99;
+    }
+
+    function getValue(row, fieldName) {
+      return fieldName ? Number(row[fieldName]?.value || 0) : 0;
+    }
+
+    function getRendered(row, fieldName) {
+      return fieldName ? row[fieldName]?.rendered || null : null;
+    }
+
+    function pctNumber(v) {
+      let num = Number(v || 0);
+      if (Math.abs(num) <= 1.2) num *= 100;
+      return num;
+    }
+
+    function formatPct(v, rendered, signed) {
+      const num = pctNumber(v);
+
+      if (rendered) {
+        const value = clean(rendered);
+        if (!signed) return value;
+        const icon = num > 0 ? "▲ " : num < 0 ? "▼ " : "• ";
+        return icon + value.replace(/^[-+▲▼• ]+/, "");
+      }
+
+      const icon = signed
+        ? num > 0 ? "▲ " : num < 0 ? "▼ " : "• "
+        : "";
+
+      return icon + Math.abs(num).toFixed(1) + "%";
+    }
+
+    function paceClass(v) {
+      const num = pctNumber(v);
+
+      if (num >= 0) return "psim-good";
+      if (num >= -7) return "psim-warning";
+      return "psim-risk";
+    }
+
+    function occupancyClass(v) {
+      const occ = pctNumber(v);
+
+      if (occ >= 85) return "psim-good";
+      if (occ >= 65) return "psim-demand";
+      if (occ >= 50) return "psim-warning";
+      return "psim-risk";
+    }
+
+    function rowStatus(row) {
+      const avgPace = (
+        pctNumber(row.revenuePace) +
+        pctNumber(row.roomNightsPace) +
+        pctNumber(row.adrPace)
+      ) / 3;
+
+      if (avgPace >= 0) return "strong";
+      if (avgPace >= -7) return "watch";
+      return "weak";
+    }
+
+    const rows = data
+      .map(row => {
+        const month =
+          clean(row[monthField]?.rendered) ||
+          clean(row[monthField]?.value) ||
+          "Unknown";
+
+        return {
+          month,
+          rank: monthRank(month),
+
+          revenuePace: getValue(row, revenuePaceField),
+          roomNightsPace: getValue(row, roomNightsPaceField),
+          adrPace: getValue(row, adrPaceField),
+          currentOtbOcc: getValue(row, currentOtbOccField),
+
+          revenuePaceRendered: getRendered(row, revenuePaceField),
+          roomNightsPaceRendered: getRendered(row, roomNightsPaceField),
+          adrPaceRendered: getRendered(row, adrPaceField),
+          currentOtbOccRendered: getRendered(row, currentOtbOccField)
+        };
+      })
+      .filter(row => row.month)
+      .sort((a, b) => a.rank - b.rank);
+
+    let sortKey = "rank";
+    let sortDirection = 1;
+
+    function renderCell(value, rendered, type) {
+      const cls = type === "occupancy"
+        ? occupancyClass(value)
+        : paceClass(value);
+
+      return `
+        <span class="psim-pill ${cls}">
+          ${formatPct(value, rendered, type !== "occupancy")}
+        </span>
+      `;
+    }
+
+    function renderRow(row, extraClass) {
+      const status = rowStatus(row);
+
+      const rowClass = [
+        extraClass || "",
+        status === "strong" ? "psim-strong" : "",
+        status === "weak" ? "psim-weak" : ""
+      ].join(" ");
+
+      return `
+        <tr class="${rowClass}">
+          <td class="psim-month">${row.month}</td>
+
+          <td>
+            ${renderCell(row.revenuePace, row.revenuePaceRendered, "pace")}
+          </td>
+
+          <td>
+            ${renderCell(row.roomNightsPace, row.roomNightsPaceRendered, "pace")}
+          </td>
+
+          <td>
+            ${renderCell(row.adrPace, row.adrPaceRendered, "pace")}
+          </td>
+
+          <td>
+            ${renderCell(row.currentOtbOcc, row.currentOtbOccRendered, "occupancy")}
+          </td>
+        </tr>
+      `;
+    }
+
+    function totalsRow() {
+      if (!queryResponse.totals_data) return null;
+
+      const t = queryResponse.totals_data;
+
+      return {
+        month: "TOTAL",
+        rank: 999,
+
+        revenuePace: Number(t[revenuePaceField]?.value || 0),
+        roomNightsPace: Number(t[roomNightsPaceField]?.value || 0),
+        adrPace: Number(t[adrPaceField]?.value || 0),
+        currentOtbOcc: Number(t[currentOtbOccField]?.value || 0),
+
+        revenuePaceRendered: t[revenuePaceField]?.rendered || null,
+        roomNightsPaceRendered: t[roomNightsPaceField]?.rendered || null,
+        adrPaceRendered: t[adrPaceField]?.rendered || null,
+        currentOtbOccRendered: t[currentOtbOccField]?.rendered || null
+      };
+    }
+
+    function renderTable() {
+      const sortedRows = [...rows].sort((a, b) => {
+        if (sortKey === "rank") {
+          return (a.rank - b.rank) * sortDirection;
+        }
+
+        return (
+          Number(a[sortKey] || 0) -
+          Number(b[sortKey] || 0)
+        ) * sortDirection;
+      });
+
+      const bestRow = rows.reduce((best, row) => {
+        const score =
+          pctNumber(row.revenuePace) +
+          pctNumber(row.roomNightsPace) +
+          pctNumber(row.adrPace);
+
+        const bestScore = best
+          ? pctNumber(best.revenuePace) + pctNumber(best.roomNightsPace) + pctNumber(best.adrPace)
+          : -999999;
+
+        return score > bestScore ? row : best;
+      }, null);
+
+      const totals = totalsRow();
+
+      tableWrapEl.innerHTML = `
+        <div class="psim-scroll">
+          <table class="psim-table">
+            <thead>
+              <tr>
+                <th data-sort="rank">Month</th>
+                <th data-sort="revenuePace">Revenue Pace %</th>
+                <th data-sort="roomNightsPace">Room Nights Pace %</th>
+                <th data-sort="adrPace">ADR Pace %</th>
+                <th data-sort="currentOtbOcc">Current OTB Occupancy</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${sortedRows.map(row =>
+                renderRow(row, bestRow && row.month === bestRow.month ? "psim-best" : "")
+              ).join("")}
+
+              ${totals ? renderRow(totals, "psim-best") : ""}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      tableWrapEl.querySelectorAll("th[data-sort]").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-sort");
+
+          if (sortKey === key) {
+            sortDirection *= -1;
+          } else {
+            sortKey = key;
+            sortDirection = key === "rank" ? 1 : -1;
+          }
+
+          renderTable();
+        });
+      });
+    }
+
+    renderTable();
+    done();
+  }
+});
