@@ -336,7 +336,7 @@ looker.plugins.visualizations.add({
         const achievement = pctNumber(d.achievement);
 
         if (achievement >= 95) return "Low Gap / On Track";
-        if (achievement >= 75) return "Remaining Opportunity";
+        if (achievement >= 65) return "Remaining Opportunity";
         return "High Gap Risk";
       }
 
